@@ -1,0 +1,29 @@
+{
+  "name": "lung-nodule-detection",
+  "version": "1.0.0",
+  "description": "AI-Supported Lung Nodule Detection and Classification Using Medical Imaging",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "UI"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=UI & npm run dev --workspace=backend",
+    "dev:ui": "npm run dev --workspace=UI",
+    "dev:backend": "npm run dev --workspace=backend",
+    "build": "npm run build --workspace=UI",
+    "start:backend": "npm run start --workspace=backend",
+    "lint": "npm run lint --workspace=UI",
+    "install:all": "npm install && npm install --workspace=backend && npm install --workspace=UI"
+  },
+  "keywords": [
+    "lung",
+    "nodule",
+    "detection",
+    "medical",
+    "imaging",
+    "ai"
+  ],
+  "author": "",
+  "license": "ISC"
+}

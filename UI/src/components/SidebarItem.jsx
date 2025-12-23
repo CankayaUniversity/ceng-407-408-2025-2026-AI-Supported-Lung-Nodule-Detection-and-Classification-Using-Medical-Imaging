@@ -1,71 +1,61 @@
 import { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
-import './SidebarItem.css';
+import { ChevronDown } from 'lucide-react';
 
-function SidebarItem({ icon: Icon, label, isCollapsed, subitems = [], href }) {
-  const [isExpanded, setIsExpanded] = useState(false);
+function SidebarItem({ icon: Icon, label, href, isCollapsed, subitems }) {
   const location = useLocation();
-
+  const [isOpen, setIsOpen] = useState(false);
+  
   const isActive = href && location.pathname === href;
-  const hasSubitems = subitems.length > 0;
+  const isSubitemActive = subitems && subitems.some(item => location.pathname === item.href);
 
-  const handleToggle = (e) => {
-    if (hasSubitems) {
-      e.preventDefault();
-      setIsExpanded(!isExpanded);
-    }
-  };
-
-  const itemContent = (
-    <div className={`sidebar-item ${isActive ? 'active' : ''}`}>
-      <div className="item-main" onClick={handleToggle}>
-        <Icon size={20} className="item-icon" />
-        {!isCollapsed && <span className="item-label">{label}</span>}
-        {!isCollapsed && hasSubitems && (
-          <ChevronDown
-            size={16}
-            className={`chevron ${isExpanded ? 'expanded' : ''}`}
-          />
+  if (subitems) {
+    return (
+      <div className="sidebar-item-group">
+        <button
+          className={`sidebar-item-btn ${isSubitemActive ? 'active' : ''}`}
+          onClick={() => setIsOpen(!isOpen)}
+          title={isCollapsed ? label : ''}
+        >
+          <Icon size={20} />
+          {!isCollapsed && (
+            <>
+              <span>{label}</span>
+              <ChevronDown 
+                size={16} 
+                className={`chevron ${isOpen ? 'open' : ''}`}
+              />
+            </>
+          )}
+        </button>
+        {isOpen && !isCollapsed && (
+          <div className="sidebar-subitems">
+            {subitems.map((subitem) => (
+              <Link
+                key={subitem.href}
+                to={subitem.href}
+                className={`sidebar-subitem ${
+                  location.pathname === subitem.href ? 'active' : ''
+                }`}
+              >
+                {subitem.label}
+              </Link>
+            ))}
+          </div>
         )}
       </div>
-    </div>
-  );
-
-  if (href && !hasSubitems) {
-    return <Link to={href} className="sidebar-item-link">{itemContent}</Link>;
+    );
   }
 
   return (
-    <div className="sidebar-item-wrapper">
-      {hasSubitems ? (
-        <button
-          className="sidebar-item-button"
-          onClick={handleToggle}
-          aria-expanded={isExpanded}
-        >
-          {itemContent}
-        </button>
-      ) : (
-        itemContent
-      )}
-
-      {!isCollapsed && hasSubitems && isExpanded && (
-        <div className="submenu">
-          {subitems.map((subitem) => (
-            <Link
-              key={subitem.href}
-              to={subitem.href}
-              className={`submenu-item ${
-                location.pathname === subitem.href ? 'active' : ''
-              }`}
-            >
-              {subitem.label}
-            </Link>
-          ))}
-        </div>
-      )}
-    </div>
+    <Link
+      to={href}
+      className={`sidebar-item ${isActive ? 'active' : ''}`}
+      title={isCollapsed ? label : ''}
+    >
+      <Icon size={20} />
+      {!isCollapsed && <span>{label}</span>}
+    </Link>
   );
 }
 

@@ -22,10 +22,7 @@ function WorkList() {
     if (priority !== 'all' && p !== priority) return false;
     if (onlyReady && s.status === 'Unread') return false;
     if (searchTerm && !s.patientName.toLowerCase().includes(searchTerm.toLowerCase()) && !s.patientID.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-    // simple date filters (mock)
-    if (dateRange === 'today') return true;
-    if (dateRange === '7d') return true;
-    if (dateRange === '30d') return true;
+    
     return true;
   });
 

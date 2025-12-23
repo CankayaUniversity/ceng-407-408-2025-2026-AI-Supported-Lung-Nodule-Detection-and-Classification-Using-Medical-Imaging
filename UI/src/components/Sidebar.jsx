@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   FileText,
   Folder,
-  Settings,
   PlusSquare,
   Archive,
   FileText as FileDoc,
@@ -44,11 +43,8 @@ function Sidebar({ isCollapsed }) {
     {
       id: 'profile',
       icon: User,
-      label: 'Profile',
-      subitems: [
-        { label: 'Settings', href: '/settings' },
-        { label: 'Account', href: '/profile' },
-      ],
+      label: 'Account',
+      href: '/profile',
     },
   ];
 
