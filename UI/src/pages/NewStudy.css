@@ -1,0 +1,76 @@
+.new-study-input {
+  background-color: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 14px;
+  color: var(--color-text-primary);
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.new-study-input::placeholder {
+  color: #ffffff;
+  opacity: 0.7;
+}
+
+.new-study-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+.patient-info-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 24px;
+}
+
+.patient-info-section > div {
+  flex: 1;
+}
+
+.save-btn {
+  padding: 10px 24px;
+  background-color: var(--color-accent);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.save-btn:hover {
+  background-color: #2563eb;
+  transform: translateY(-2px);
+}
+
+.save-btn:active {
+  transform: translateY(0);
+}
+
+.submit-btn {
+  padding: 10px 24px;
+  background-color: #10b981;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 12px;
+  transition: all var(--transition-fast);
+}
+
+.submit-btn:hover {
+  background-color: #059669;
+  transform: translateY(-2px);
+}
+
+.submit-btn:active {
+  transform: translateY(0);
+}
