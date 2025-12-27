@@ -1,0 +1,3 @@
+[submodule "models/lung25demo"]
+	path = models/lung25demo
+	url = https://github.com/fc63/lung25demo.git
