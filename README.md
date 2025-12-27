@@ -11,9 +11,10 @@ AI-Supported Lung Nodule Detection and Classification Using Medical Imaging
 UI/                    # Frontend interface
 models/                # Machine Learning components
 └── lung25demo/         # ML pipeline (submodule)
+.gitmodules             # Git submodule configuration
 Literature Review.docx
-package.json
 README.md
+package.json
 ```
 
 > ⚠️ The `models/lung25demo` directory is a **Git submodule** and must be initialized after cloning.
