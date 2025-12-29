@@ -1,9 +1,10 @@
-# ceng-407-408-2025-2026-AI-Supported-Lung-Nodule-Detection-and-Classification-Using-Medical-Imaging
+<img width="2816" height="1504" alt="LUNGXAİ LOGO" src="https://github.com/user-attachments/assets/31a38582-d823-4d31-a14e-3df083df65ea" /># ceng-407-408-2025-2026-AI-Supported-Lung-Nodule-Detection-and-Classification-Using-Medical-Imaging
 AI-Supported Lung Nodule Detection and Classification Using Medical Imaging
 
 
 
 ---
+![Uploading LUNGXAİ LOGO.png…]()
 
 ## Repository Structure
 
