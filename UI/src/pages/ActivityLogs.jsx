@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { LogOut, Calendar, User, Filter, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import './ActivityLogs.css';
+
+const API_URL = 'http://localhost:3001/api';
 
 function ActivityLogs() {
   const navigate = useNavigate();
@@ -13,21 +15,37 @@ function ActivityLogs() {
   });
 
   const [showFilters, setShowFilters] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const allLogs = [
-    { id: 1, date: '23.12.2025', time: '15:42', user: 'dr.ayşe', role: 'Doctor', action: 'Hasta P-10234 inceleme ekranını açtı' },
-    { id: 2, date: '23.12.2025', time: '14:32', user: 'dr.mehmet', role: 'Doctor', action: 'P-10233 hastası için rapor oluşturdu' },
-    { id: 3, date: '23.12.2025', time: '13:15', user: 'admin', role: 'Admin', action: 'Yeni kullanıcı ekledi: Dr. Fatih Kaya' },
-    { id: 4, date: '23.12.2025', time: '11:42', user: 'dr.fatih', role: 'Doctor', action: 'Sistem ayarlarını güncelledi' },
-    { id: 5, date: '22.12.2025', time: '16:55', user: 'dr.ayşe', role: 'Doctor', action: 'P-10232 hastasının inceleme ekranını kapatıp tamamlandı işaretledi' },
-    { id: 6, date: '22.12.2025', time: '15:20', user: 'admin', role: 'Admin', action: 'Dr. Mehmet kullanıcısının şifresini sıfırladı' },
-    { id: 7, date: '22.12.2025', time: '14:05', user: 'dr.mehmet', role: 'Doctor', action: 'Yeni çalışma ekledi - Hasta: M.A., TC: 123456789' },
-    { id: 8, date: '22.12.2025', time: '13:30', user: 'dr.fatih', role: 'Doctor', action: 'Kullanıcı profili güncellendi' },
-    { id: 9, date: '21.12.2025', time: '16:10', user: 'admin', role: 'Admin', action: 'Dr. Ayşe kullanıcısını pasifleştirdi' },
-    { id: 10, date: '21.12.2025', time: '15:45', user: 'dr.ayşe', role: 'Doctor', action: 'P-10231 hastasının tüm görüntülerini görüntüledi' },
-  ];
+  useEffect(() => {
+    fetchLogs();
+  }, []);
 
-  const [logs] = useState(allLogs);
+  const fetchLogs = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/activity-logs?limit=100`);
+      const data = await response.json();
+      
+      const formattedLogs = data.map(log => ({
+        id: log.id,
+        date: new Date(log.created_at).toLocaleDateString('en-US'),
+        time: new Date(log.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        user: log.username,
+        role: log.action_type === 'login' || log.action_type === 'logout' ? 'User' : 'System',
+        action: log.action,
+        actionType: log.action_type
+      }));
+      
+      setLogs(formattedLogs);
+    } catch (error) {
+      console.error('Error fetching logs:', error);
+      setLogs([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('userType');
@@ -39,21 +57,27 @@ function ActivityLogs() {
     return [...new Set(logs.map(log => log.user))];
   };
 
+  const filteredLogs = logs.filter(log => {
+    if (filters.user !== 'all' && log.user !== filters.user) return false;
+    if (filters.actionType !== 'all' && log.actionType !== filters.actionType) return false;
+    return true;
+  });
+
   return (
     <div className="activity-logs">
       <div className="al-header">
         <div>
-          <h1>İşlem Kayıtları</h1>
-          <p>Sistem aktivitesi ve işlem geçmişi</p>
+          <h1>Activity Logs</h1>
+          <p>System activity and transaction history</p>
         </div>
         <div className="header-actions">
           <button className="back-btn" onClick={() => navigate('/admin')}>
             <ArrowLeft size={18} />
-            Geri Dön
+            Go Back
           </button>
           <button className="logout-btn" onClick={handleLogout}>
             <LogOut size={18} />
-            Çıkış
+            Logout
           </button>
         </div>
       </div>
@@ -66,7 +90,7 @@ function ActivityLogs() {
             onClick={() => setShowFilters(!showFilters)}
           >
             <Filter size={18} />
-            Filtreler
+            Filters
           </button>
         </div>
 
@@ -74,7 +98,7 @@ function ActivityLogs() {
         {showFilters && (
           <div className="filters-panel">
             <div className="filter-group">
-              <label>Başlangıç Tarihi</label>
+              <label>Start Date</label>
               <input
                 type="date"
                 value={filters.dateFrom}
@@ -83,7 +107,7 @@ function ActivityLogs() {
             </div>
 
             <div className="filter-group">
-              <label>Bitiş Tarihi</label>
+              <label>End Date</label>
               <input
                 type="date"
                 value={filters.dateTo}
@@ -92,12 +116,12 @@ function ActivityLogs() {
             </div>
 
             <div className="filter-group">
-              <label>Kullanıcı</label>
+              <label>User</label>
               <select
                 value={filters.user}
                 onChange={(e) => setFilters({ ...filters, user: e.target.value })}
               >
-                <option value="all">Tüm Kullanıcılar</option>
+                <option value="all">All Users</option>
                 {getUniqueUsers().map(user => (
                   <option key={user} value={user}>{user}</option>
                 ))}
@@ -105,16 +129,16 @@ function ActivityLogs() {
             </div>
 
             <div className="filter-group">
-              <label>İşlem Türü</label>
+              <label>Action Type</label>
               <select
                 value={filters.actionType}
                 onChange={(e) => setFilters({ ...filters, actionType: e.target.value })}
               >
-                <option value="all">Tüm İşlemler</option>
-                <option value="login">Giriş</option>
-                <option value="view">Görüntüleme</option>
-                <option value="create">Oluşturma</option>
-                <option value="report">Rapor</option>
+                <option value="all">All Actions</option>
+                <option value="login">Login</option>
+                <option value="logout">Logout</option>
+                <option value="user">User Actions</option>
+                <option value="study">Study Actions</option>
               </select>
             </div>
           </div>
@@ -122,18 +146,23 @@ function ActivityLogs() {
 
         {/* Logs Table */}
         <div className="table-wrapper">
+          {loading ? (
+            <p style={{ textAlign: 'center', padding: '40px' }}>Loading...</p>
+          ) : filteredLogs.length === 0 ? (
+            <p style={{ textAlign: 'center', padding: '40px' }}>No activity records yet</p>
+          ) : (
           <table className="logs-table">
             <thead>
               <tr>
-                <th>Tarih-Saat</th>
-                <th>Kullanıcı</th>
-                <th>Rol</th>
-                <th>İşlem Açıklaması</th>
+                <th>Date-Time</th>
+                <th>User</th>
+                <th>Action Type</th>
+                <th>Description</th>
               </tr>
             </thead>
             <tbody>
-              {logs.map((log) => (
-                <tr key={log.id} className={`role-${log.role.toLowerCase()}`}>
+              {filteredLogs.map((log) => (
+                <tr key={log.id}>
                   <td className="log-datetime">
                     <Calendar size={16} />
                     <span>{log.date} {log.time}</span>
@@ -143,8 +172,11 @@ function ActivityLogs() {
                     <span>{log.user}</span>
                   </td>
                   <td>
-                    <span className={`role-badge ${log.role.toLowerCase()}`}>
-                      {log.role === 'Doctor' ? 'Doktor' : 'Admin'}
+                    <span className={`action-type-badge ${log.actionType}`}>
+                      {log.actionType === 'login' ? 'Login' : 
+                       log.actionType === 'logout' ? 'Logout' :
+                       log.actionType === 'user' ? 'User' :
+                       log.actionType === 'study' ? 'Study' : 'Other'}
                     </span>
                   </td>
                   <td className="log-action">{log.action}</td>
@@ -152,6 +184,7 @@ function ActivityLogs() {
               ))}
             </tbody>
           </table>
+          )}
         </div>
       </div>
     </div>

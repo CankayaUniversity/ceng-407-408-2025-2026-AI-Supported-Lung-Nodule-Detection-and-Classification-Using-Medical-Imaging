@@ -6,32 +6,15 @@ import * as dicomParser from 'dicom-parser';
 cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
 cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
 
-// Configure WADO Image Loader
+// Configure WADO Image Loader - disable web workers for simpler setup
 cornerstoneWADOImageLoader.configure({
-  useWebWorkers: true,
+  useWebWorkers: false,
   decodeConfig: {
     convertFloatPixelDataToInt: false
   }
 });
 
-let maxWebWorkers = 1;
-
-if (navigator.hardwareConcurrency) {
-  maxWebWorkers = Math.min(navigator.hardwareConcurrency, 7);
-}
-
-const config = {
-  maxWebWorkers,
-  startWebWorkersOnDemand: false,
-  taskConfiguration: {
-    decodeTask: {
-      initializeCodecsOnStartup: false,
-      strict: false
-    }
-  }
-};
-
-cornerstoneWADOImageLoader.webWorkerManager.initialize(config);
+// Web workers disabled for simpler setup - no initialization needed
 
 export { cornerstone, cornerstoneWADOImageLoader, dicomParser };
 
@@ -126,8 +109,17 @@ export function displayDicomImage(element, imageId) {
   });
 }
 
+// Track which elements have been initialized
+const initializedElements = new WeakSet();
+
 // Enable/disable specific tools
 export function enableImageTools(element) {
+  // Only add event listeners once per element
+  if (initializedElements.has(element)) {
+    return;
+  }
+  initializedElements.add(element);
+  
   // Add mouse wheel zoom
   element.addEventListener('wheel', (e) => {
     e.preventDefault();
@@ -139,43 +131,77 @@ export function enableImageTools(element) {
     }
   });
   
-  // Add window level adjustment
-  let isMouseDown = false;
+  // Mouse state
+  let isPanning = false;
+  let isWindowLevel = false;
   let startX, startY;
   
+  // Disable context menu on right click
+  element.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+  });
+  
   element.addEventListener('mousedown', (e) => {
-    if (e.button === 0) { // Left click
-      isMouseDown = true;
+    if (e.button === 0) { // Left click - Pan
+      isPanning = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      element.style.cursor = 'grabbing';
+    } else if (e.button === 2) { // Right click - Window/Level
+      isWindowLevel = true;
       startX = e.clientX;
       startY = e.clientY;
     }
   });
   
   element.addEventListener('mousemove', (e) => {
-    if (isMouseDown) {
-      const viewport = cornerstone.getViewport(element);
-      if (viewport) {
-        const deltaX = e.clientX - startX;
-        const deltaY = e.clientY - startY;
-        
-        viewport.voi.windowWidth += deltaX;
-        viewport.voi.windowCenter += deltaY;
-        
-        cornerstone.setViewport(element, viewport);
-        
-        startX = e.clientX;
-        startY = e.clientY;
-      }
+    const viewport = cornerstone.getViewport(element);
+    if (!viewport) return;
+    
+    if (isPanning) {
+      // Pan the image
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+      
+      viewport.translation.x += deltaX / viewport.scale;
+      viewport.translation.y += deltaY / viewport.scale;
+      
+      cornerstone.setViewport(element, viewport);
+      
+      startX = e.clientX;
+      startY = e.clientY;
+    } else if (isWindowLevel) {
+      // Adjust window/level
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+      
+      viewport.voi.windowWidth += deltaX * 2;
+      viewport.voi.windowCenter += deltaY * 2;
+      
+      // Prevent negative window width
+      if (viewport.voi.windowWidth < 1) viewport.voi.windowWidth = 1;
+      
+      cornerstone.setViewport(element, viewport);
+      
+      startX = e.clientX;
+      startY = e.clientY;
     }
   });
   
   element.addEventListener('mouseup', () => {
-    isMouseDown = false;
+    isPanning = false;
+    isWindowLevel = false;
+    element.style.cursor = 'grab';
   });
   
   element.addEventListener('mouseleave', () => {
-    isMouseDown = false;
+    isPanning = false;
+    isWindowLevel = false;
+    element.style.cursor = 'grab';
   });
+  
+  // Set initial cursor
+  element.style.cursor = 'grab';
 }
 
 // Reset viewport to default

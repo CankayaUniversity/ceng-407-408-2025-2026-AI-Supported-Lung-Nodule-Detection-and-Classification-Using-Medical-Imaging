@@ -253,6 +253,33 @@
   color: #7c2d12;
 }
 
+.action-type-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.action-type-badge.login {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.action-type-badge.logout {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.action-type-badge.user {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.action-type-badge.study {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
 .role-doctor {
   border-left: 3px solid #0c4a6e;
 }

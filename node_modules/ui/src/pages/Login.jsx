@@ -1,27 +1,66 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogIn } from 'lucide-react';
+import { LogIn, Loader } from 'lucide-react';
 import './Login.css';
+
+const API_URL = 'http://localhost:3001/api';
 
 function Login() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [userType, setUserType] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleLogin = (type) => {
-    if (username.trim() && password.trim()) {
-      // Store user type for later use
-      localStorage.setItem('userType', type);
-      localStorage.setItem('username', username);
-      
-      if (type === 'doctor') {
-        navigate('/worklist');
-      } else if (type === 'admin') {
-        navigate('/admin');
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    
+    if (!username.trim() || !password.trim()) {
+      setError('Please enter username and password');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ username, password })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Save user information
+        localStorage.setItem('userType', result.user.role.toLowerCase());
+        localStorage.setItem('username', result.user.name);
+        localStorage.setItem('userId', result.user.id.toString());
+        localStorage.setItem('userEmail', result.user.email);
+        localStorage.setItem('userFirstName', result.user.firstName);
+        localStorage.setItem('userLastName', result.user.lastName);
+        localStorage.setItem('userSpecialization', result.user.specialization || '');
+        localStorage.setItem('userDepartment', result.user.department || '');
+        localStorage.setItem('userHospital', result.user.hospital || '');
+        localStorage.setItem('userLicenseNumber', result.user.licenseNumber || '');
+
+        // Redirect based on role
+        if (result.user.role === 'Admin') {
+          navigate('/admin');
+        } else {
+          navigate('/worklist');
+        }
+      } else {
+        setError(result.error || 'Login failed');
       }
-    } else {
-      alert('Please enter username and password');
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('Cannot connect to server. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -36,7 +75,13 @@ function Login() {
           <p>Medical Imaging Analysis System</p>
         </div>
 
-        <form className="login-form" onSubmit={(e) => e.preventDefault()}>
+        <form className="login-form" onSubmit={handleLogin}>
+          {error && (
+            <div className="error-message">
+              {error}
+            </div>
+          )}
+
           <div className="form-group">
             <label htmlFor="username">Username</label>
             <input
@@ -46,6 +91,7 @@ function Login() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="form-input"
+              disabled={loading}
             />
           </div>
 
@@ -58,44 +104,29 @@ function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="form-input"
+              disabled={loading}
             />
           </div>
 
-          <div className="role-selection">
-            <p className="role-label">Select Your Role:</p>
-            <div className="role-buttons">
-              <button
-                type="button"
-                className={`role-btn doctor-btn ${userType === 'doctor' ? 'active' : ''}`}
-                onClick={() => setUserType('doctor')}
-              >
-                <span className="role-name">Doctor</span>
-                <span className="role-desc">Medical Professional</span>
-              </button>
-              <button
-                type="button"
-                className={`role-btn admin-btn ${userType === 'admin' ? 'active' : ''}`}
-                onClick={() => setUserType('admin')}
-              >
-                <span className="role-name">Administrator</span>
-                <span className="role-desc">System Admin</span>
-              </button>
-            </div>
-          </div>
-
           <button
-            type="button"
+            type="submit"
             className="login-btn"
-            onClick={() => userType && handleLogin(userType)}
-            disabled={!userType}
+            disabled={loading}
           >
-            Sign In
+            {loading ? (
+              <>
+                <Loader size={18} className="spin" />
+                Logging in...
+              </>
+            ) : (
+              'Login'
+            )}
           </button>
         </form>
 
         <div className="login-footer">
-          <p>Demo Credentials</p>
-          <p className="demo-text">Username: demo | Password: demo123</p>
+          <p>Use the credentials provided by</p>
+          <p className="demo-text">your system administrator</p>
         </div>
       </div>
     </div>

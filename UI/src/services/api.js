@@ -53,7 +53,46 @@ export const dicomAPI = {
 // Nodule API
 export const noduleAPI = {
   create: (noduleData) => api.post('/nodules', noduleData),
+  getById: (id) => api.get(`/nodules/${id}`),
   getByStudy: (studyId) => api.get(`/studies/${studyId}/nodules`),
+  update: (id, noduleData) => api.put(`/nodules/${id}`, noduleData),
+};
+
+// Report API
+export const reportAPI = {
+  create: (reportData) => api.post('/reports', reportData),
+  getAll: () => api.get('/reports'),
+  getById: (id) => api.get(`/reports/${id}`),
+  getByUser: (userId) => api.get(`/reports?user_id=${userId}`),
+  delete: (id) => api.delete(`/reports/${id}`),
+};
+
+// User API
+export const userAPI = {
+  create: (userData) => api.post('/users', userData),
+  getAll: () => api.get('/users'),
+  getById: (id) => api.get(`/users/${id}`),
+  updateStatus: (id, status) => api.put(`/users/${id}/status`, { status }),
+  updateProfile: (id, profileData) => api.put(`/users/${id}/profile`, profileData),
+  delete: (id) => api.delete(`/users/${id}`),
+};
+
+// Auth API
+export const authAPI = {
+  login: (credentials) => api.post('/auth/login', credentials),
+};
+
+// Dashboard API
+export const dashboardAPI = {
+  getStats: () => api.get('/stats/dashboard'),
+  getUserStats: () => api.get('/stats/users'),
+};
+
+// Activity Log API
+export const activityLogAPI = {
+  create: (logData) => api.post('/activity-logs', logData),
+  getAll: (limit = 50) => api.get(`/activity-logs?limit=${limit}`),
+  getRecent: (hours = 24) => api.get(`/activity-logs/recent?hours=${hours}`),
 };
 
 export default api;

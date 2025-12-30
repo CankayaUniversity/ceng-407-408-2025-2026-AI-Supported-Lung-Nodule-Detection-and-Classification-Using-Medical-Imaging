@@ -1,0 +1,297 @@
+/* MyReports.css - Report viewing styles */
+
+/* Button variants */
+.view-btn {
+  background: linear-gradient(135deg, #3498db, #2980b9) !important;
+}
+.view-btn:hover {
+  background: linear-gradient(135deg, #2980b9, #1f6692) !important;
+}
+
+.pdf-btn {
+  background: linear-gradient(135deg, #27ae60, #1e8449) !important;
+}
+.pdf-btn:hover {
+  background: linear-gradient(135deg, #1e8449, #145a32) !important;
+}
+
+.delete-btn {
+  background: linear-gradient(135deg, #e74c3c, #c0392b) !important;
+  padding: 8px 12px !important;
+  min-width: auto !important;
+}
+.delete-btn:hover {
+  background: linear-gradient(135deg, #c0392b, #922b21) !important;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+/* Report view modal */
+.report-view-modal {
+  background: white;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 700px;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #3498db, #2980b9);
+  color: white;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.close-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Report sections */
+.report-section {
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.report-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.report-section h4 {
+  margin: 0 0 16px 0;
+  font-size: 1.1rem;
+  color: #2c3e50;
+}
+
+/* Info grid */
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.info-item label {
+  font-size: 11px;
+  color: #95a5a6;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.info-item span {
+  font-size: 14px;
+  color: #2c3e50;
+  font-weight: 500;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  background: #27ae60;
+  color: white;
+  border-radius: 20px;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+/* Summary cards */
+.summary-cards {
+  display: flex;
+  gap: 16px;
+}
+
+.summary-card {
+  flex: 1;
+  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  padding: 20px;
+  border-radius: 12px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summary-card .number {
+  font-size: 32px;
+  font-weight: 700;
+  color: #3498db;
+}
+
+.summary-card .label {
+  font-size: 12px;
+  color: #666;
+}
+
+/* Nodules list */
+.nodules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nodule-card {
+  background: #f8f9fa;
+  border-radius: 10px;
+  padding: 16px;
+  border-left: 4px solid #3498db;
+}
+
+.nodule-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.nodule-id {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.nodule-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #555;
+}
+
+.nodule-details label {
+  color: #888;
+  font-weight: 500;
+}
+
+.assessment-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+  margin-left: 8px;
+}
+
+.assessment-badge.benign {
+  background: #d4edda;
+  color: #155724;
+}
+
+.assessment-badge.suspicious {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.assessment-badge.malignant {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+/* Modal footer */
+.modal-footer {
+  padding: 16px 24px;
+  background: #f8f9fa;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  border-top: 1px solid #e9ecef;
+}
+
+.cancel-btn {
+  padding: 10px 24px;
+  border: 1px solid #ddd;
+  background: white;
+  color: #666;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.cancel-btn:hover {
+  background: #f5f5f5;
+  border-color: #ccc;
+}
+
+.generate-btn {
+  padding: 10px 24px;
+  border: none;
+  background: linear-gradient(135deg, #27ae60, #1e8449);
+  color: white;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.generate-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(39, 174, 96, 0.4);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .report-view-modal {
+    width: 95%;
+    max-height: 90vh;
+  }
+  
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .summary-cards {
+    flex-direction: column;
+  }
+}

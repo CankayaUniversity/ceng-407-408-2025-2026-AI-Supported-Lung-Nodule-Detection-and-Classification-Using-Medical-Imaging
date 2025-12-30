@@ -8,7 +8,7 @@ function SystemSettings() {
   const [settings, setSettings] = useState({
     activeModel: 'Model-A-v2.0',
     storageLocation: '/var/lungxai/images/',
-    language: 'tr',
+    language: 'en',
     logLevel: 'detailed',
   });
 
@@ -29,17 +29,17 @@ function SystemSettings() {
     <div className="system-settings">
       <div className="ss-header">
         <div>
-          <h1>Sistem Ayarları</h1>
-          <p>Yapay zeka ve sistem konfigürasyonu</p>
+          <h1>System Settings</h1>
+          <p>AI and system configuration</p>
         </div>
         <div className="header-actions">
           <button className="back-btn" onClick={() => navigate('/admin')}>
             <ArrowLeft size={18} />
-            Geri Dön
+            Go Back
           </button>
           <button className="logout-btn" onClick={handleLogout}>
             <LogOut size={18} />
-            Çıkış
+            Logout
           </button>
         </div>
       </div>
@@ -49,20 +49,20 @@ function SystemSettings() {
         <div className="settings-section">
           <div className="section-header">
             <SettingsIcon size={20} />
-            <h2>Yapay Zeka Ayarları</h2>
+            <h2>AI Settings</h2>
           </div>
           
           <div className="setting-item">
             <div className="setting-label">
-              <label>Aktif Model</label>
-              <p>Şu anda kullanılan yapay zeka modeli</p>
+              <label>Active Model</label>
+              <p>Currently used AI model</p>
             </div>
             <div className="setting-control">
               <select
                 value={settings.activeModel}
                 onChange={(e) => setSettings({ ...settings, activeModel: e.target.value })}
               >
-                <option value="Model-A-v2.0">Model A v2.0 (Mevcut)</option>
+                <option value="Model-A-v2.0">Model A v2.0 (Current)</option>
                 <option value="Model-B-v1.5">Model B v1.5</option>
                 <option value="Model-C-v1.0">Model C v1.0</option>
               </select>
@@ -70,7 +70,7 @@ function SystemSettings() {
           </div>
 
           <div className="setting-info">
-            <p>Sistem ayarları sayfasında, aktif yapay zekâ modeli ve bazı temel konfigürasyonlar admin tarafından yönetilmektedir.</p>
+            <p>On the system settings page, the active AI model and some basic configurations are managed by the administrator.</p>
           </div>
         </div>
 
@@ -78,13 +78,13 @@ function SystemSettings() {
         <div className="settings-section">
           <div className="section-header">
             <SettingsIcon size={20} />
-            <h2>Depolama Ayarları</h2>
+            <h2>Storage Settings</h2>
           </div>
 
           <div className="setting-item">
             <div className="setting-label">
-              <label>Görüntü Depolama Yolu</label>
-              <p>Tıbbi görüntülerin kaydedileceği dizin</p>
+              <label>Image Storage Path</label>
+              <p>Directory where medical images will be saved</p>
             </div>
             <div className="setting-control">
               <input
@@ -102,37 +102,37 @@ function SystemSettings() {
         <div className="settings-section">
           <div className="section-header">
             <SettingsIcon size={20} />
-            <h2>Genel Ayarlar</h2>
+            <h2>General Settings</h2>
           </div>
 
           <div className="setting-item">
             <div className="setting-label">
-              <label>Dil</label>
-              <p>Sistem arayüzü dili</p>
+              <label>Language</label>
+              <p>System interface language</p>
             </div>
             <div className="setting-control">
               <select
                 value={settings.language}
                 onChange={(e) => setSettings({ ...settings, language: e.target.value })}
               >
-                <option value="tr">Türkçe</option>
                 <option value="en">English</option>
+                <option value="tr">Türkçe</option>
               </select>
             </div>
           </div>
 
           <div className="setting-item">
             <div className="setting-label">
-              <label>Log Seviyesi</label>
-              <p>Sistem log tutma seviyesi</p>
+              <label>Log Level</label>
+              <p>System logging level</p>
             </div>
             <div className="setting-control">
               <select
                 value={settings.logLevel}
                 onChange={(e) => setSettings({ ...settings, logLevel: e.target.value })}
               >
-                <option value="detailed">Detaylı</option>
-                <option value="standard">Standart</option>
+                <option value="detailed">Detailed</option>
+                <option value="standard">Standard</option>
                 <option value="minimal">Minimal</option>
               </select>
             </div>
@@ -143,9 +143,9 @@ function SystemSettings() {
         <div className="settings-actions">
           <button className="btn-save" onClick={handleSave}>
             <Save size={18} />
-            Ayarları Kaydet
+            Save Settings
           </button>
-          {saved && <span className="save-success">✓ Ayarlar başarıyla kaydedildi</span>}
+          {saved && <span className="save-success">✓ Settings saved successfully</span>}
         </div>
       </div>
     </div>

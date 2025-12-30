@@ -8,11 +8,15 @@
     "UI"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=UI & npm run dev --workspace=backend",
+    "start": "concurrently --kill-others \"npm run start:backend\" \"npm run start:ui\"",
+    "restart": "taskkill /F /IM node.exe 2>nul & timeout /t 2 & npm run start",
+    "stop": "taskkill /F /IM node.exe 2>nul",
+    "dev": "concurrently --kill-others \"npm run dev:backend\" \"npm run dev:ui\"",
     "dev:ui": "npm run dev --workspace=UI",
     "dev:backend": "npm run dev --workspace=backend",
-    "build": "npm run build --workspace=UI",
+    "start:ui": "npm run dev --workspace=UI",
     "start:backend": "npm run start --workspace=backend",
+    "build": "npm run build --workspace=UI",
     "lint": "npm run lint --workspace=UI",
     "install:all": "npm install && npm install --workspace=backend && npm install --workspace=UI"
   },
@@ -25,5 +29,8 @@
     "ai"
   ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
 }

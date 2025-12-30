@@ -168,6 +168,30 @@
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
+.delete-btn {
+  padding: 6px 10px;
+  background-color: transparent;
+  color: #e74c3c;
+  border: 1px solid #e74c3c;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-left: 8px;
+}
+
+.delete-btn:hover {
+  background-color: #e74c3c;
+  color: white;
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
+}
+
+.action-cell {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
 .empty-state {
   display: flex;
   align-items: center;
