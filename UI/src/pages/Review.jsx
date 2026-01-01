@@ -38,6 +38,8 @@ export default function Review(){
   const { studyId } = useParams();
   const navigate = useNavigate();
   const viewerRef = useRef(null);
+  const viewerInitialized = useRef(false);
+  const dicomFilesRef = useRef([]);
   
   // Core state
   const [study, setStudy] = useState(null);
@@ -48,6 +50,40 @@ export default function Review(){
   
   // Viewer state
   const [viewerReady, setViewerReady] = useState(false);
+  
+  // Keep dicomFilesRef in sync
+  useEffect(() => {
+    dicomFilesRef.current = dicomFiles;
+  }, [dicomFiles]);
+  
+  // Callback ref to initialize cornerstone when element is mounted
+  const setViewerRef = useCallback((element) => {
+    if (element && !viewerRef.current) {
+      viewerRef.current = element;
+      console.log('Viewer element mounted, initializing cornerstone...');
+      
+      // Initialize cornerstone on this element
+      try {
+        cornerstone.enable(element);
+        setViewerReady(true);
+        console.log('Cornerstone enabled successfully');
+        
+        // Load first image if dicomFiles are available
+        if (dicomFilesRef.current.length > 0) {
+          const file = dicomFilesRef.current[0];
+          const imageId = `wadouri:http://localhost:3001${file.file_path}`;
+          cornerstone.loadAndCacheImage(imageId).then(image => {
+            cornerstone.displayImage(element, image);
+            cornerstone.resize(element, true);
+            enableImageTools(element);
+            console.log('First image displayed');
+          }).catch(err => console.error('Error loading first image:', err));
+        }
+      } catch (e) {
+        console.error('Error enabling cornerstone:', e);
+      }
+    }
+  }, []);
   const [windowLevel, setWindowLevel] = useState(WINDOW_PRESETS.lung);
   const [activePreset, setActivePreset] = useState('lung');
   const [zoom, setZoom] = useState(1);
@@ -66,6 +102,11 @@ export default function Review(){
   // Report state
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportGenerating, setReportGenerating] = useState(false);
+
+  // Debug: Log state changes
+  useEffect(() => {
+    console.log('State update - viewerReady:', viewerReady, 'dicomFiles:', dicomFiles.length, 'viewerRef:', !!viewerRef.current);
+  }, [viewerReady, dicomFiles.length]);
 
   useEffect(() => {
     loadStudyData();
@@ -106,10 +147,47 @@ export default function Review(){
 
   // Also load when viewerReady changes
   useEffect(() => {
-    if (viewerReady && dicomFiles.length > 0) {
-      loadDicomImage(currentImageIndex);
+    if (viewerReady && dicomFiles.length > 0 && !viewerInitialized.current) {
+      viewerInitialized.current = true;
+      
+      // Load and display the first image
+      const displayFirstImage = async () => {
+        try {
+          const file = dicomFiles[0];
+          const imageId = `wadouri:http://localhost:3001${file.file_path}`;
+          
+          console.log('Loading first image:', imageId);
+          const image = await cornerstone.loadAndCacheImage(imageId);
+          
+          if (viewerRef.current) {
+            cornerstone.displayImage(viewerRef.current, image);
+            cornerstone.resize(viewerRef.current, true);
+            
+            // Apply window preset
+            const viewport = cornerstone.getViewport(viewerRef.current);
+            if (viewport) {
+              viewport.voi.windowWidth = 1500;
+              viewport.voi.windowCenter = -600;
+              cornerstone.setViewport(viewerRef.current, viewport);
+            }
+            
+            enableImageTools(viewerRef.current);
+            console.log('First image displayed successfully');
+          }
+        } catch (err) {
+          console.error('Error displaying first image:', err);
+        }
+      };
+      
+      // Small delay then display
+      setTimeout(displayFirstImage, 100);
     }
-  }, [viewerReady]);
+  }, [viewerReady, dicomFiles.length]);
+
+  // Reset initialization flag when study changes
+  useEffect(() => {
+    viewerInitialized.current = false;
+  }, [studyId]);
 
   // Initialize cornerstone when dicomFiles are loaded
   useEffect(() => {
@@ -118,6 +196,21 @@ export default function Review(){
     let timeoutId;
     let retryCount = 0;
     const maxRetries = 30;
+    
+    // Helper function to load first image immediately after cornerstone is enabled
+    const loadFirstImage = async (element) => {
+      try {
+        const file = dicomFiles[0];
+        if (!file) return;
+        const imageId = `wadouri:http://localhost:3001${file.file_path}`;
+        const image = await cornerstone.loadAndCacheImage(imageId);
+        cornerstone.displayImage(element, image);
+        cornerstone.resize(element, true);
+        console.log('First image loaded successfully');
+      } catch (err) {
+        console.error('Error loading first image:', err);
+      }
+    };
     
     const initCornerstone = () => {
       try {
@@ -156,11 +249,15 @@ export default function Review(){
           cornerstone.getEnabledElement(element);
           console.log('Cornerstone already enabled');
           setViewerReady(true);
+          // Load first image immediately after enabling
+          loadFirstImage(element);
         } catch (e) {
           try {
             cornerstone.enable(element);
             console.log('Cornerstone enabled successfully, element:', element);
             setViewerReady(true);
+            // Load first image immediately after enabling
+            loadFirstImage(element);
           } catch (enableError) {
             console.error('Failed to enable cornerstone:', enableError);
             retryCount++;
@@ -671,7 +768,13 @@ export default function Review(){
           <div className="viewer-wrapper">
             {dicomFiles.length > 0 ? (
               <>
-                <div ref={viewerRef} className="dicom-viewer" tabIndex={0} style={{ width: '100%', height: '600px', minHeight: '600px' }} />
+                <div 
+                  key={`viewer-${studyId}`}
+                  ref={setViewerRef} 
+                  className="dicom-viewer" 
+                  tabIndex={0} 
+                  style={{ width: '100%', height: '600px', minHeight: '600px', background: '#000' }} 
+                />
                 {imageLoading && <div className="image-loading-overlay"><div className="loading-spinner small"></div></div>}
                 
                 {showSegmentation && nodules.map((nodule, i) => (
