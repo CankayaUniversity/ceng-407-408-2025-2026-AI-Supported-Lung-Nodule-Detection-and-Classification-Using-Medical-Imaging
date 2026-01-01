@@ -1,1 +1,26 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Environment files (each developer has their own)
+.env
+backend/.env
+
+# Build outputs
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploads (keep folder structure)
+backend/uploads/*
+!backend/uploads/.gitkeep

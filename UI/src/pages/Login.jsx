@@ -125,8 +125,7 @@ function Login() {
         </form>
 
         <div className="login-footer">
-          <p>Use the credentials provided by</p>
-          <p className="demo-text">your system administrator</p>
+         
         </div>
       </div>
     </div>

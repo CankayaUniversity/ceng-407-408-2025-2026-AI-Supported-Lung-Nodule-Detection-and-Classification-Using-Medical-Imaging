@@ -1,9 +1,37 @@
 import sql from 'mssql/msnodesqlv8.js';
+import dotenv from 'dotenv';
 
-// SQL Server configuration - Windows Authentication
-// Connection Name: LungNoduleDB
+// Load environment variables
+dotenv.config();
+
+// Validate required environment variables
+const DB_SERVER = process.env.DB_SERVER;
+const DB_DATABASE = process.env.DB_DATABASE || 'lung_nodule';
+
+if (!DB_SERVER) {
+  console.error('❌ ERROR: DB_SERVER is not defined in .env file');
+  console.error('📋 Please create a .env file based on .env.example');
+  console.error('');
+  console.error('Steps:');
+  console.error('1. Copy .env.example to .env');
+  console.error('2. Set DB_SERVER to your SQL Server instance name');
+  console.error('   Examples: .\\SQLEXPRESS, localhost\\SQLEXPRESS, BMD\\SQLEXPRESS01');
+  process.exit(1);
+}
+
+// SQL Server configuration for master (to create database)
+const masterConfig = {
+  connectionString: `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=master;Trusted_Connection=yes;`,
+  pool: {
+    max: 10,
+    min: 0,
+    idleTimeoutMillis: 30000
+  }
+};
+
+// SQL Server configuration for app database
 const config = {
-  connectionString: 'Driver={ODBC Driver 17 for SQL Server};Server=BMD\\SQLEXPRESS01;Database=lung_nodule;Trusted_Connection=yes;',
+  connectionString: `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=${DB_DATABASE};Trusted_Connection=yes;`,
   pool: {
     max: 10,
     min: 0,
@@ -13,20 +41,57 @@ const config = {
 
 let pool = null;
 
+// Create database if not exists
+async function ensureDatabaseExists() {
+  let masterPool = null;
+  try {
+    console.log('🔍 Checking if database exists...');
+    masterPool = await sql.connect(masterConfig);
+    
+    // Check if database exists
+    const result = await masterPool.request()
+      .input('dbName', sql.NVarChar, DB_DATABASE)
+      .query(`SELECT database_id FROM sys.databases WHERE name = @dbName`);
+    
+    if (result.recordset.length === 0) {
+      console.log(`📦 Creating database "${DB_DATABASE}"...`);
+      await masterPool.request().query(`CREATE DATABASE [${DB_DATABASE}]`);
+      console.log(`✅ Database "${DB_DATABASE}" created successfully!`);
+    } else {
+      console.log(`✅ Database "${DB_DATABASE}" already exists`);
+    }
+    
+    await masterPool.close();
+  } catch (error) {
+    if (masterPool) await masterPool.close();
+    console.error('❌ Error checking/creating database:', error.message);
+    throw error;
+  }
+}
+
 // Veritabanı bağlantısını başlat
 export async function initDatabase() {
   try {
+    // First ensure database exists
+    await ensureDatabaseExists();
+    
+    // Now connect to the app database
     pool = await sql.connect(config);
-    console.log('SQL Server baglantisi basarili!');
-    console.log(`Database: lung_nodule`);
-    console.log(`Server: BMD\\SQLEXPRESS01`);
+    console.log('✅ SQL Server baglantisi basarili!');
+    console.log(`📊 Database: ${DB_DATABASE}`);
+    console.log(`🖥️  Server: ${DB_SERVER}`);
     
     // Tabloları oluştur
     await createTables();
     
     return pool;
   } catch (error) {
-    console.error('SQL Server baglanti hatasi:', error);
+    console.error('❌ SQL Server baglanti hatasi:', error.message);
+    console.error('');
+    console.error('🔍 Troubleshooting:');
+    console.error('1. Make sure SQL Server is running');
+    console.error('2. Verify DB_SERVER in .env file matches your SQL Server instance');
+    console.error('3. Check that Windows Authentication is enabled');
     throw error;
   }
 }
