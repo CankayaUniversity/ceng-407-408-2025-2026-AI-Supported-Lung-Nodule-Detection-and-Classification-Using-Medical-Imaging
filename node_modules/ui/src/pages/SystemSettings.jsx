@@ -145,7 +145,7 @@ function SystemSettings() {
             <Save size={18} />
             Save Settings
           </button>
-          {saved && <span className="save-success">✓ Settings saved successfully</span>}
+          {saved && <span className="save-success">Settings saved successfully</span>}
         </div>
       </div>
     </div>

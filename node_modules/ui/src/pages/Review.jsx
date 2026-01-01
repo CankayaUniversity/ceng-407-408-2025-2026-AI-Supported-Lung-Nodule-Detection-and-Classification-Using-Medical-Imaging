@@ -799,7 +799,7 @@ export default function Review(){
             ) : (
               <div className="viewer-placeholder">
                 <div className="placeholder-content">
-                  <span style={{ fontSize: '48px', marginBottom: '16px' }}>📷</span>
+                  <span style={{ fontSize: '48px', marginBottom: '16px' }}>No Image</span>
                   <h4>No DICOM Images Available</h4>
                   <p style={{ color: '#666', fontSize: '14px', marginTop: '8px' }}>
                     DICOM files were not uploaded for this study.<br/>
@@ -812,12 +812,12 @@ export default function Review(){
 
           {dicomFiles.length > 0 && (
             <div className="slice-navigation">
-              <button className="slice-nav-btn" onClick={() => setCurrentImageIndex(Math.max(0, currentImageIndex - 1))} disabled={currentImageIndex === 0}>◀</button>
+              <button className="slice-nav-btn" onClick={() => setCurrentImageIndex(Math.max(0, currentImageIndex - 1))} disabled={currentImageIndex === 0}>&lt;</button>
               <div className="slice-slider-container">
                 <input type="range" min="0" max={dicomFiles.length - 1} value={currentImageIndex} onChange={handleSliderChange} className="slice-slider" />
                 <span className="slice-info">{currentImageIndex + 1} / {dicomFiles.length}</span>
               </div>
-              <button className="slice-nav-btn" onClick={() => setCurrentImageIndex(Math.min(dicomFiles.length - 1, currentImageIndex + 1))} disabled={currentImageIndex === dicomFiles.length - 1}>▶</button>
+              <button className="slice-nav-btn" onClick={() => setCurrentImageIndex(Math.min(dicomFiles.length - 1, currentImageIndex + 1))} disabled={currentImageIndex === dicomFiles.length - 1}>&gt;</button>
             </div>
           )}
           <div className="viewer-shortcuts"><span>Left Drag: Pan</span><span>Right Drag: W/L</span><span>Arrows: Slices</span></div>
@@ -835,8 +835,7 @@ export default function Review(){
                       <span className={`risk-badge ${nodule.risk}`}>{nodule.risk.toUpperCase()}</span>
                     </div>
                     <div className="nodule-item-info">
-                      <span>{nodule.location} • {nodule.size}mm</span>
-                      <span className={`review-status ${nodule.reviewed ? 'done' : ''}`}>{nodule.reviewed ? '✓' : '○'}</span>
+                      <span>{nodule.location} - {nodule.size}mm</span>
                     </div>
                   </div>
                 )) : <div className="no-nodules">No nodules detected</div>}

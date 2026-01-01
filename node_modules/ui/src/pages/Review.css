@@ -131,6 +131,7 @@
   display: flex;
   flex: 1;
   overflow: hidden;
+  min-height: 0;
 }
 
 /* Panels */
@@ -331,8 +332,9 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: #0a0e17;
+  background: #000;
   min-width: 0;
+  min-height: 0;
 }
 
 .viewer-toolbar {
@@ -340,8 +342,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.5rem 1rem;
-  background: #12171f;
-  border-bottom: 1px solid #30363d;
+  background: #000;
+  border-bottom: 1px solid #222;
   flex-shrink: 0;
 }
 
@@ -432,14 +434,14 @@
   position: relative;
   background: #000;
   overflow: hidden;
-  min-height: 500px;
-  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .dicom-viewer {
   width: 100%;
   height: 100%;
-  min-height: 500px;
   outline: none;
   background: #000;
 }
@@ -566,10 +568,9 @@
 .slice-navigation {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
-  background: #12171f;
-  border-top: 1px solid #30363d;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: #000;
   flex-shrink: 0;
 }
 
@@ -625,13 +626,7 @@
 }
 
 .viewer-shortcuts {
-  display: flex;
-  justify-content: center;
-  gap: 2rem;
-  padding: 0.5rem;
-  background: #0a0e17;
-  font-size: 0.75rem;
-  color: #8b949e;
+  display: none;
 }
 
 /* Right Panel - Nodules */

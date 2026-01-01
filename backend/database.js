@@ -1,16 +1,14 @@
 import sql from 'mssql/msnodesqlv8.js';
 import dotenv from 'dotenv';
 
-// Load environment variables
 dotenv.config();
 
-// Validate required environment variables
 const DB_SERVER = process.env.DB_SERVER;
 const DB_DATABASE = process.env.DB_DATABASE || 'lung_nodule';
 
 if (!DB_SERVER) {
-  console.error('❌ ERROR: DB_SERVER is not defined in .env file');
-  console.error('📋 Please create a .env file based on .env.example');
+  console.error('ERROR: DB_SERVER is not defined in .env file');
+  console.error('Please create a .env file based on .env.example');
   console.error('');
   console.error('Steps:');
   console.error('1. Copy .env.example to .env');
@@ -19,7 +17,6 @@ if (!DB_SERVER) {
   process.exit(1);
 }
 
-// SQL Server configuration for master (to create database)
 const masterConfig = {
   connectionString: `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=master;Trusted_Connection=yes;`,
   pool: {
@@ -29,7 +26,6 @@ const masterConfig = {
   }
 };
 
-// SQL Server configuration for app database
 const config = {
   connectionString: `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=${DB_DATABASE};Trusted_Connection=yes;`,
   pool: {
@@ -41,11 +37,10 @@ const config = {
 
 let pool = null;
 
-// Create database if not exists
 async function ensureDatabaseExists() {
   let masterPool = null;
   try {
-    console.log('🔍 Checking if database exists...');
+    console.log('Checking if database exists...');
     masterPool = await sql.connect(masterConfig);
     
     // Check if database exists
@@ -54,41 +49,37 @@ async function ensureDatabaseExists() {
       .query(`SELECT database_id FROM sys.databases WHERE name = @dbName`);
     
     if (result.recordset.length === 0) {
-      console.log(`📦 Creating database "${DB_DATABASE}"...`);
+      console.log(`Creating database "${DB_DATABASE}"...`);
       await masterPool.request().query(`CREATE DATABASE [${DB_DATABASE}]`);
-      console.log(`✅ Database "${DB_DATABASE}" created successfully!`);
+      console.log(`Database "${DB_DATABASE}" created successfully!`);
     } else {
-      console.log(`✅ Database "${DB_DATABASE}" already exists`);
+      console.log(`Database "${DB_DATABASE}" already exists`);
     }
     
     await masterPool.close();
   } catch (error) {
     if (masterPool) await masterPool.close();
-    console.error('❌ Error checking/creating database:', error.message);
+    console.error('Error checking/creating database:', error.message);
     throw error;
   }
 }
 
-// Veritabanı bağlantısını başlat
 export async function initDatabase() {
   try {
-    // First ensure database exists
     await ensureDatabaseExists();
     
-    // Now connect to the app database
     pool = await sql.connect(config);
-    console.log('✅ SQL Server baglantisi basarili!');
-    console.log(`📊 Database: ${DB_DATABASE}`);
-    console.log(`🖥️  Server: ${DB_SERVER}`);
+    console.log('SQL Server baglantisi basarili!');
+    console.log(`Database: ${DB_DATABASE}`);
+    console.log(`Server: ${DB_SERVER}`);
     
-    // Tabloları oluştur
     await createTables();
     
     return pool;
   } catch (error) {
-    console.error('❌ SQL Server baglanti hatasi:', error.message);
+    console.error('SQL Server baglanti hatasi:', error.message);
     console.error('');
-    console.error('🔍 Troubleshooting:');
+    console.error('Troubleshooting:');
     console.error('1. Make sure SQL Server is running');
     console.error('2. Verify DB_SERVER in .env file matches your SQL Server instance');
     console.error('3. Check that Windows Authentication is enabled');
@@ -96,97 +87,8 @@ export async function initDatabase() {
   }
 }
 
-// Tabloları oluştur
 async function createTables() {
   try {
-    // Patients tablosu
-    await pool.request().query(`
-      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='patients' AND xtype='U')
-      CREATE TABLE patients (
-        id INT IDENTITY(1,1) PRIMARY KEY,
-        patient_id NVARCHAR(50) UNIQUE NOT NULL,
-        name NVARCHAR(100) NOT NULL,
-        age INT,
-        gender NVARCHAR(10),
-        created_at DATETIME DEFAULT GETDATE()
-      )
-    `);
-
-    // Studies tablosu
-    await pool.request().query(`
-      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='studies' AND xtype='U')
-      CREATE TABLE studies (
-        id INT IDENTITY(1,1) PRIMARY KEY,
-        study_id NVARCHAR(50) UNIQUE NOT NULL,
-        patient_id NVARCHAR(50) NOT NULL,
-        study_date NVARCHAR(50),
-        description NVARCHAR(255),
-        clinical_note NVARCHAR(MAX),
-        nodule_count INT DEFAULT 0,
-        status NVARCHAR(20) DEFAULT 'pending',
-        created_at DATETIME DEFAULT GETDATE(),
-        FOREIGN KEY (patient_id) REFERENCES patients(patient_id)
-      )
-    `);
-
-    // DICOM files tablosu
-    await pool.request().query(`
-      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='dicom_files' AND xtype='U')
-      CREATE TABLE dicom_files (
-        id INT IDENTITY(1,1) PRIMARY KEY,
-        study_id NVARCHAR(50) NOT NULL,
-        file_path NVARCHAR(500) NOT NULL,
-        file_name NVARCHAR(255) NOT NULL,
-        instance_number INT,
-        uploaded_at DATETIME DEFAULT GETDATE(),
-        FOREIGN KEY (study_id) REFERENCES studies(study_id)
-      )
-    `);
-
-    // Nodules tablosu
-    await pool.request().query(`
-      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='nodules' AND xtype='U')
-      CREATE TABLE nodules (
-        id INT IDENTITY(1,1) PRIMARY KEY,
-        study_id NVARCHAR(50) NOT NULL,
-        nodule_number INT,
-        location NVARCHAR(100),
-        size_mm FLOAT,
-        risk_level NVARCHAR(20),
-        coordinates NVARCHAR(MAX),
-        slice_index INT,
-        probability FLOAT,
-        doctor_assessment NVARCHAR(50),
-        notes NVARCHAR(MAX),
-        include_in_report BIT DEFAULT 1,
-        reviewed BIT DEFAULT 0,
-        created_at DATETIME DEFAULT GETDATE(),
-        FOREIGN KEY (study_id) REFERENCES studies(study_id)
-      )
-    `);
-
-    // Reports tablosu
-    await pool.request().query(`
-      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='reports' AND xtype='U')
-      CREATE TABLE reports (
-        id INT IDENTITY(1,1) PRIMARY KEY,
-        report_id NVARCHAR(50) UNIQUE NOT NULL,
-        study_id NVARCHAR(50) NOT NULL,
-        patient_id NVARCHAR(50) NOT NULL,
-        patient_name NVARCHAR(100),
-        study_date NVARCHAR(50),
-        nodule_count INT DEFAULT 0,
-        included_nodule_count INT DEFAULT 0,
-        report_data NVARCHAR(MAX),
-        generated_by NVARCHAR(100),
-        generated_by_id INT,
-        status NVARCHAR(20) DEFAULT 'completed',
-        created_at DATETIME DEFAULT GETDATE(),
-        FOREIGN KEY (study_id) REFERENCES studies(study_id)
-      )
-    `);
-
-    // Users tablosu
     await pool.request().query(`
       IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='users' AND xtype='U')
       CREATE TABLE users (
@@ -206,10 +108,109 @@ async function createTables() {
         created_at DATETIME DEFAULT GETDATE()
       )
     `);
-    
-    // Add new columns if they don't exist (for existing tables)
-    
-    // Users table columns
+
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='patients' AND xtype='U')
+      CREATE TABLE patients (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        patient_id NVARCHAR(50) UNIQUE NOT NULL,
+        name NVARCHAR(100) NOT NULL,
+        age INT,
+        gender NVARCHAR(10),
+        created_at DATETIME DEFAULT GETDATE()
+      )
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='studies' AND xtype='U')
+      CREATE TABLE studies (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        study_id NVARCHAR(50) UNIQUE NOT NULL,
+        patient_id NVARCHAR(50) NOT NULL,
+        study_date NVARCHAR(50),
+        description NVARCHAR(255),
+        clinical_note NVARCHAR(MAX),
+        nodule_count INT DEFAULT 0,
+        status NVARCHAR(20) DEFAULT 'pending',
+        reviewed BIT DEFAULT 0,
+        reviewed_at DATETIME,
+        reviewed_by INT,
+        created_at DATETIME DEFAULT GETDATE(),
+        CONSTRAINT FK_studies_patient FOREIGN KEY (patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE,
+        CONSTRAINT FK_studies_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='dicom_files' AND xtype='U')
+      CREATE TABLE dicom_files (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        study_id NVARCHAR(50) NOT NULL,
+        file_path NVARCHAR(500) NOT NULL,
+        file_name NVARCHAR(255) NOT NULL,
+        instance_number INT,
+        uploaded_at DATETIME DEFAULT GETDATE(),
+        CONSTRAINT FK_dicom_files_study FOREIGN KEY (study_id) REFERENCES studies(study_id) ON DELETE CASCADE
+      )
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='nodules' AND xtype='U')
+      CREATE TABLE nodules (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        study_id NVARCHAR(50) NOT NULL,
+        nodule_number INT,
+        location NVARCHAR(100),
+        size_mm FLOAT,
+        risk_level NVARCHAR(20),
+        coordinates NVARCHAR(MAX),
+        slice_index INT,
+        probability FLOAT,
+        doctor_assessment NVARCHAR(50),
+        notes NVARCHAR(MAX),
+        include_in_report BIT DEFAULT 1,
+        reviewed BIT DEFAULT 0,
+        created_at DATETIME DEFAULT GETDATE(),
+        CONSTRAINT FK_nodules_study FOREIGN KEY (study_id) REFERENCES studies(study_id) ON DELETE CASCADE
+      )
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='reports' AND xtype='U')
+      CREATE TABLE reports (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        report_id NVARCHAR(50) UNIQUE NOT NULL,
+        study_id NVARCHAR(50) NOT NULL,
+        patient_id NVARCHAR(50) NOT NULL,
+        patient_name NVARCHAR(100),
+        study_date NVARCHAR(50),
+        nodule_count INT DEFAULT 0,
+        included_nodule_count INT DEFAULT 0,
+        report_data NVARCHAR(MAX),
+        generated_by NVARCHAR(100),
+        generated_by_id INT,
+        status NVARCHAR(20) DEFAULT 'completed',
+        created_at DATETIME DEFAULT GETDATE(),
+        CONSTRAINT FK_reports_study FOREIGN KEY (study_id) REFERENCES studies(study_id) ON DELETE CASCADE,
+        CONSTRAINT FK_reports_patient FOREIGN KEY (patient_id) REFERENCES patients(patient_id),
+        CONSTRAINT FK_reports_user FOREIGN KEY (generated_by_id) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='activity_logs' AND xtype='U')
+      CREATE TABLE activity_logs (
+        id INT IDENTITY(1,1) PRIMARY KEY,
+        user_id INT,
+        username NVARCHAR(50),
+        action NVARCHAR(255),
+        action_type NVARCHAR(50),
+        details NVARCHAR(MAX),
+        created_at DATETIME DEFAULT GETDATE(),
+        CONSTRAINT FK_activity_logs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+
     await pool.request().query(`
       IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('users') AND name = 'specialization')
       ALTER TABLE users ADD specialization NVARCHAR(100)
@@ -227,7 +228,6 @@ async function createTables() {
       ALTER TABLE users ADD license_number NVARCHAR(50)
     `);
     
-    // Studies table columns
     await pool.request().query(`
       IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('studies') AND name = 'clinical_note')
       ALTER TABLE studies ADD clinical_note NVARCHAR(MAX)
@@ -245,7 +245,6 @@ async function createTables() {
       ALTER TABLE studies ADD reviewed_by INT
     `);
     
-    // Nodules table columns
     await pool.request().query(`
       IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('nodules') AND name = 'slice_index')
       ALTER TABLE nodules ADD slice_index INT
@@ -271,58 +270,73 @@ async function createTables() {
       ALTER TABLE nodules ADD reviewed BIT DEFAULT 0
     `);
 
-    // Default admin user (if not exists)
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_studies_reviewer')
+      BEGIN
+        IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('studies') AND name = 'reviewed_by')
+        AND EXISTS (SELECT * FROM sysobjects WHERE name='users' AND xtype='U')
+        BEGIN
+          ALTER TABLE studies ADD CONSTRAINT FK_studies_reviewer 
+            FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+        END
+      END
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_reports_patient')
+      BEGIN
+        IF EXISTS (SELECT * FROM sysobjects WHERE name='reports' AND xtype='U')
+        AND EXISTS (SELECT * FROM sysobjects WHERE name='patients' AND xtype='U')
+        BEGIN
+          ALTER TABLE reports ADD CONSTRAINT FK_reports_patient 
+            FOREIGN KEY (patient_id) REFERENCES patients(patient_id)
+        END
+      END
+    `);
+
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sys.foreign_keys WHERE name = 'FK_reports_user')
+      BEGIN
+        IF EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('reports') AND name = 'generated_by_id')
+        AND EXISTS (SELECT * FROM sysobjects WHERE name='users' AND xtype='U')
+        BEGIN
+          ALTER TABLE reports ADD CONSTRAINT FK_reports_user 
+            FOREIGN KEY (generated_by_id) REFERENCES users(id) ON DELETE SET NULL
+        END
+      END
+    `);
+
     await pool.request().query(`
       IF NOT EXISTS (SELECT * FROM users WHERE username = 'admin')
       INSERT INTO users (username, password, first_name, last_name, email, role, status, department)
       VALUES ('admin', 'admin123', 'System', 'Admin', 'admin@hospital.com', 'Admin', 'Active', 'IT Department')
     `);
 
-    // Default doctor user (if not exists)
     await pool.request().query(`
       IF NOT EXISTS (SELECT * FROM users WHERE username = 'doctor')
       INSERT INTO users (username, password, first_name, last_name, email, role, status, specialization, department, hospital, license_number)
       VALUES ('doctor', 'doctor123', 'Demo', 'Doctor', 'doctor@hospital.com', 'Doctor', 'Active', 'Radiology', 'Radiology Department', 'Medical Center Hospital', 'MD-123456')
     `);
 
-    // Activity logs tablosu
-    await pool.request().query(`
-      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='activity_logs' AND xtype='U')
-      CREATE TABLE activity_logs (
-        id INT IDENTITY(1,1) PRIMARY KEY,
-        user_id INT,
-        username NVARCHAR(50),
-        action NVARCHAR(255),
-        action_type NVARCHAR(50),
-        details NVARCHAR(MAX),
-        created_at DATETIME DEFAULT GETDATE(),
-        FOREIGN KEY (user_id) REFERENCES users(id)
-      )
-    `);
-
     console.log('Tablolar basariyla olusturuldu/kontrol edildi');
-    console.log('Varsayilan kullanicilar kontrol edildi');
-    console.log('Ornek hastalar ve calismalar kontrol edildi');
+    console.log('Foreign Key iliskileri kontrol edildi');
+    console.log('Varsayilan kullanicilar olusturuldu');
   } catch (error) {
     console.error('Tablo olusturma hatasi:', error.message);
     throw error;
   }
 }
 
-// Bağlantı havuzunu al
 export function getPool() {
   return pool;
 }
 
-// Bağlantıyı kapat
 export async function closeDatabase() {
   if (pool) {
     await pool.close();
     console.log('SQL Server bağlantısı kapatıldı');
   }
 }
-
-// ============ PATIENT OPERATIONS ============
 
 export async function createPatient(patientData) {
   const { patient_id, name, age, gender } = patientData;
@@ -376,8 +390,6 @@ export async function deletePatient(patientId) {
   
   return result.rowsAffected[0];
 }
-
-// ============ STUDY ISLEMLERI ============
 
 export async function createStudy(studyData) {
   const { study_id, patient_id, study_date, description, clinical_note } = studyData;
@@ -441,9 +453,7 @@ export async function markStudyAsReviewed(studyId, userId) {
     `);
 }
 
-// Delete study and all related data (nodules, dicom_files, reports)
 export async function deleteStudy(studyId) {
-  // Delete in order: nodules -> dicom_files -> reports -> study
   await pool.request()
     .input('study_id', sql.NVarChar, studyId)
     .query(`DELETE FROM nodules WHERE study_id = @study_id`);
@@ -462,8 +472,6 @@ export async function deleteStudy(studyId) {
   
   return result.rowsAffected[0];
 }
-
-// ============ DICOM FILE OPERATIONS ============
 
 export async function saveDicomFile(fileData) {
   const { study_id, file_path, file_name, instance_number } = fileData;
@@ -486,8 +494,6 @@ export async function getDicomFilesByStudy(studyId) {
     .query('SELECT * FROM dicom_files WHERE study_id = @study_id ORDER BY instance_number');
   return result.recordset;
 }
-
-// ============ NODULE ISLEMLERI ============
 
 export async function saveNodule(noduleData) {
   const { study_id, nodule_number, location, size_mm, risk_level, coordinates, slice_index, probability, doctor_assessment, notes, include_in_report, reviewed } = noduleData;
@@ -575,7 +581,6 @@ export async function getNodule(noduleId) {
   return result.recordset[0];
 }
 
-// Delete a single nodule
 export async function deleteNodule(noduleId) {
   const result = await pool.request()
     .input('id', sql.Int, noduleId)
@@ -583,15 +588,12 @@ export async function deleteNodule(noduleId) {
   return result.rowsAffected[0];
 }
 
-// Delete all nodules for a study
 export async function deleteNodulesByStudy(studyId) {
   const result = await pool.request()
     .input('study_id', sql.NVarChar, studyId)
     .query('DELETE FROM nodules WHERE study_id = @study_id');
   return result.rowsAffected[0];
 }
-
-// ============ USER ISLEMLERI ============
 
 export async function createUser(userData) {
   const { username, password, first_name, last_name, email, role } = userData;
@@ -683,8 +685,6 @@ export async function updateUserProfile(userId, profileData) {
   return result.recordset[0];
 }
 
-// ============ STATISTICS OPERATIONS ============
-
 export async function getDashboardStats() {
   const result = await pool.request().query(`
     SELECT 
@@ -712,8 +712,6 @@ export async function getUserStats() {
   `);
   return result.recordset[0];
 }
-
-// ============ ACTIVITY LOG OPERATIONS ============
 
 export async function createActivityLog(logData) {
   const { user_id, username, action, action_type, details } = logData;
@@ -751,8 +749,6 @@ export async function getRecentActivityLogs(hours = 24) {
     `);
   return result.recordset;
 }
-
-// ============ REPORT OPERATIONS ============
 
 export async function createReport(reportData) {
   const { report_id, study_id, patient_id, patient_name, study_date, nodule_count, included_nodule_count, report_data, generated_by, generated_by_id } = reportData;

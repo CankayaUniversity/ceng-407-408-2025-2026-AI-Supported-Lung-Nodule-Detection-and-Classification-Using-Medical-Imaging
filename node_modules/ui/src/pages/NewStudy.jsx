@@ -407,7 +407,7 @@ function NewStudy() {
                 </>
               ) : (
                 <div className="files-selected" onClick={(e) => e.stopPropagation()}>
-                  <div className="files-icon">✓</div>
+                  <div className="files-icon">OK</div>
                   <h4>{dicomFiles.length} DICOM File{dicomFiles.length > 1 ? 's' : ''} Selected</h4>
                   <p>Ready for AI analysis</p>
                   <div className="file-list">
@@ -461,19 +461,19 @@ function NewStudy() {
                 </div>
                 <div className="progress-steps">
                   <div className={`step ${progress >= 10 ? 'active' : ''}`}>
-                    <span className="step-icon">{progress >= 40 ? '✓' : '1'}</span>
+                    <span className="step-icon">{progress >= 40 ? 'Done' : '1'}</span>
                     <span>Uploading</span>
                   </div>
                   <div className={`step ${progress >= 40 ? 'active' : ''}`}>
-                    <span className="step-icon">{progress >= 70 ? '✓' : '2'}</span>
+                    <span className="step-icon">{progress >= 70 ? 'Done' : '2'}</span>
                     <span>Processing</span>
                   </div>
                   <div className={`step ${progress >= 70 ? 'active' : ''}`}>
-                    <span className="step-icon">{progress >= 90 ? '✓' : '3'}</span>
+                    <span className="step-icon">{progress >= 90 ? 'Done' : '3'}</span>
                     <span>AI Analysis</span>
                   </div>
                   <div className={`step ${progress >= 100 ? 'active' : ''}`}>
-                    <span className="step-icon">{progress >= 100 ? '✓' : '4'}</span>
+                    <span className="step-icon">{progress >= 100 ? 'Done' : '4'}</span>
                     <span>Complete</span>
                   </div>
                 </div>
