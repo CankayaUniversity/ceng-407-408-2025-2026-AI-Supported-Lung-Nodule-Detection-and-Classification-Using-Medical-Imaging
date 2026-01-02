@@ -68,6 +68,16 @@ package.json
 
 ---
 
+## Core Model
+The core lung nodule detection model is maintained by **Furkan (fc63)**  
+and lives in the `ai/Pulmo` git submodule (branch `v1`).
+
+See `MODEL.md` for ownership and development policy.
+
+## Proposals & Experiments
+Experimental work and external proposals are archived as patches under `patches/`.
+They do not modify the core model unless explicitly reviewed and accepted.
+
 ## Clone (First Time)
 
 ```bash
@@ -106,6 +116,9 @@ git submodule update --init --recursive
 - All AI-related development must be performed inside the `Pulmo` repository.
 
 ---
+> **Note:**  
+> The core model under `ai/Pulmo` is treated as read-only in this repository.  
+> Direct modifications are not allowed; proposals must be submitted as patches or discussed beforehand.
 
 ## Disclaimer
 
