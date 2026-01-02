@@ -1,0 +1,2 @@
+1-   cd C:\Users\ORKUN\Desktop\lidc-idr\lung25demo
+2-  .\run_app_offline.ps1

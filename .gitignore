@@ -30,3 +30,5 @@ Thumbs.db
 # Uploads (keep folder structure)
 backend/uploads/*
 !backend/uploads/.gitkeep
+
+lung25demo/
