@@ -1,3 +1,4 @@
-[submodule "models/lung25demo"]
-	path = models/lung25demo
-	url = https://github.com/fc63/lung25demo.git
+[submodule "ai/Pulmo"]
+	path = ai/Pulmo
+	url = https://github.com/fc63/Pulmo.git
+	branch = v1
