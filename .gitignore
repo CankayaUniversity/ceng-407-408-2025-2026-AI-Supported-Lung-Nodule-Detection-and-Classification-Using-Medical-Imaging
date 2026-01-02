@@ -1,8 +1,11 @@
 # Dependencies
 node_modules/
+**/node_modules/
 
-# Environment files (each developer has their own)
+# Environment files
 .env
+.env.*
+!.env.example
 backend/.env
 
 # Build outputs
@@ -12,6 +15,9 @@ build/
 # Logs
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # IDE
 .vscode/
@@ -24,4 +30,3 @@ Thumbs.db
 # Uploads (keep folder structure)
 backend/uploads/*
 !backend/uploads/.gitkeep
-node_modules
