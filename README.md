@@ -1,5 +1,4 @@
 
-
 <img alt="LUNGXAI LOGO" src="https://github.com/user-attachments/assets/31a38582-d823-4d31-a14e-3df083df65ea" />
 
 # AI-Supported Lung Nodule Detection and Classification Using Medical Imaging
@@ -13,7 +12,7 @@
 - Barbaros Murat Dönmez — 202011019  
 - Ömer Faruk Şahin — 202111073  
 - Arda Kaan Bakır — 202111064  
-- Furkan Çoban — 202011204
+- Furkan Çoban — 202011204  
 - Elif Güngör — 202111077  
 
 ---
@@ -28,8 +27,8 @@ Department of Computer Engineering
 
 ## Course Information
 
-- **CENG 407 – Software Development Project I**  
-- **Fall 2025–2026**
+- CENG 407 – Software Development Project I  
+- Fall 2025–2026  
 
 ---
 
@@ -49,10 +48,6 @@ UI/                     # Frontend interface
 backend/                # Backend services & API
 ai/                     # AI & ML components (Git submodule)
 └── Pulmo/               # Lung AI pipeline (submodule)
-.gitmodules              # Git submodule configuration
-Literature Review.docx
-README.md
-package.json
 ```
 
 > **Important:**  
@@ -62,63 +57,68 @@ package.json
 
 ## AI Module (Pulmo)
 
-- `Pulmo` contains the AI-driven deep learning pipeline for lung nodule analysis.
-- It is developed and versioned independently from the main repository.
-- This design enables clean experimentation, reproducibility, and minimal coupling with UI and backend components.
+The **Pulmo** module contains the AI-driven deep learning pipeline for lung nodule detection and classification.
+
+It is developed and versioned **independently** from the main repository and integrated via a **Git submodule**.  
+This separation enables clean experimentation, reproducibility, and minimal coupling with UI and backend components.
+
+### Core Model Ownership
+
+-  The core lung nodule detection model is maintained by **[fc63](https://github.com/fc63)**.
+- It resides in the `ai/Pulmo` Git submodule (branch `v1`).
+- The core model is treated as **read-only** within this repository.
+
+For detailed ownership rules and development policy, see [MODEL.md](MODEL.md).
+
+### Experiments & Proposals
+
+- Experimental ideas and external proposals are archived as patches under `patches/`.
+- These do not modify the core model unless explicitly reviewed and approved.
+
+### Submodule Rules
+
+- The `ai/Pulmo` directory must be managed strictly as a Git submodule.
+- Do not manually copy files into or out of the submodule.
+- Files originating from the `ai/Pulmo` submodule must never be copied, duplicated, or committed into the main repository.
+- All AI-related development must be performed inside the Pulmo repository.
 
 ---
 
-## Core Model
-The core lung nodule detection model is maintained by **Furkan (fc63)**  
-and lives in the `ai/Pulmo` git submodule (branch `v1`).
+## Build & Run (Quick Start)
 
-See `MODEL.md` for ownership and development policy.
+This section allows external users to clone, initialize, and run the project locally.
 
-## Proposals & Experiments
-Experimental work and external proposals are archived as patches under `patches/`.
-They do not modify the core model unless explicitly reviewed and accepted.
-
-## Clone (First Time)
+### Clone (First Time)
 
 ```bash
 git clone --recurse-submodules https://github.com/CankayaUniversity/ceng-407-408-2025-2026-AI-Supported-Lung-Nodule-Detection-and-Classification-Using-Medical-Imaging.git
 ```
 
----
-
-## If You Already Cloned the Repository
+### If You Already Cloned the Repository
 
 ```bash
 git submodule update --init --recursive
 ```
 
----
+### Pulling Updates
 
-## Pulling Updates
-
-One-line version:
-
-```bash
-git pull && git submodule update --init --recursive
-```
 Step-by-step commands:
 ```bash
 git pull
 git submodule update --init --recursive
 ```
 
+One-line version:
+
+```bash
+git pull && git submodule update --init --recursive
+```
+
+### UI Setup
+
+For UI installation and local execution instructions, see [UI_Setup.md](UI_Setup.md).
+
 ---
-
-## Submodule Rules
-
-- The `ai/Pulmo` directory is managed strictly as a Git submodule.
-- Do not manually copy files into or out of the submodule.
-- All AI-related development must be performed inside the `Pulmo` repository.
-
----
-> **Note:**  
-> The core model under `ai/Pulmo` is treated as read-only in this repository.  
-> Direct modifications are not allowed; proposals must be submitted as patches or discussed beforehand.
 
 ## Disclaimer
 

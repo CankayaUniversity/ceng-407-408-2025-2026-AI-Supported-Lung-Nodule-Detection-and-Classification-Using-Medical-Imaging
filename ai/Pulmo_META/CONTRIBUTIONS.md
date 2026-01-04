@@ -7,6 +7,5 @@
 
 ## Experiments / Proposals (do not modify core model)
 ### Attention Gate experiment (Orkun)
-- Location: `experiments/attention_gate`
 - Origin: commit `dfd86b8` (ported from legacy `lung25demo` work)
 - Status: experiment only (not integrated into `ai/Pulmo`)
