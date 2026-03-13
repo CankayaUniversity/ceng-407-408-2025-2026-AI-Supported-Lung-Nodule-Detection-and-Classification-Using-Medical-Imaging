@@ -1,0 +1,23 @@
+# Core dependencies for SegResNet medical image segmentation
+numpy>=1.21.0
+pandas>=1.3.0
+matplotlib>=3.4.0
+scikit-image>=0.18.0
+opencv-python>=4.5.0
+
+# Medical imaging
+pydicom>=2.2.0
+SimpleITK>=2.1.0
+
+# Deep learning
+torch>=1.11.0
+torchvision>=0.12.0
+monai>=0.9.0
+
+# Training utilities
+tensorboard>=2.8.0
+tqdm>=4.62.0
+
+# Development
+jupyter>=1.0.0
+ipython>=7.0.0
