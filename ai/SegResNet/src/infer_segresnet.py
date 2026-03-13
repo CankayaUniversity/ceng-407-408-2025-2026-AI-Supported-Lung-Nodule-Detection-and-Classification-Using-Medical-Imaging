@@ -223,7 +223,7 @@ def save_predictions(predictions: np.ndarray, patient_id: str,
     
     filename = f"{patient_id}_prediction"
     
-    if format == 'niy.gz' or format == 'nii.gz':
+    if format == 'nii.gz':
         import SimpleITK as sitk
         filepath = output_path / f"{filename}.nii.gz"
         
@@ -310,7 +310,7 @@ def main():
     # Check device availability
     if args.device == 'cuda' and not torch.cuda.is_available():
         logger.warning("CUDA not available, falling back to CPU")
-        args.device = 'cuda'
+        args.device = 'cpu'
     
     # Initialize inference engine
     try:

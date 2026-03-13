@@ -341,8 +341,6 @@ def main():
             save_checkpoint(model, optimizer, epoch, {'val_dice': val_dice}, checkpoint_dir)
         
         scheduler.step(val_dice)
-        
-        logger.info("Placeholder: Data loading and training loop to be implemented")
     
     logger.info("\n" + "="*60)
     logger.info(f"Training complete. Best Dice: {best_dice:.4f}")
