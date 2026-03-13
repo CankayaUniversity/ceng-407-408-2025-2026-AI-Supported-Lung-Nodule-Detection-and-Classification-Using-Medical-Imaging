@@ -1,101 +1,170 @@
 """
 Module: build_25d_dataset.py
-Purpose: Convert 3D medical images to 2.5D dataset
-         2.5D = central slice + neighboring slices
-         This approach reduces memory while preserving 3D context
+Purpose: Convert 3D CT volumes into 2.5D training samples.
 
-TODO:
-- Load 3D volumes (NIfTI or DICOM)
-- Create 2.5D slices (e.g., slice-1, slice, slice+1)
-- Save as HDF5 or NumPy arrays
-- Create train/val/test split
+For each slice k (not near borders):
+- Extract 5-slice stack: [k-2, k-1, k, k+1, k+2]
+- Save as 5-channel image
+- Save mask for center slice k
+
+This gives 3D context while keeping memory small.
 """
 
-import os
-import logging
-from typing import Tuple, List
+import argparse
+import json
+from pathlib import Path
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
 
-
-def load_3d_volume(path: str) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Load 3D CT volume and corresponding mask.
+def load_volume(image_path, mask_path):
+    """Load 3D volume and mask from .npy files."""
+    image = np.load(image_path)
+    mask = np.load(mask_path)
     
-    Args:
-        path: Path to volume file (NIfTI or DICOM series)
+    if image.shape != mask.shape:
+        raise ValueError(f"Shape mismatch: {image.shape} vs {mask.shape}")
+    
+    return image, mask
+
+
+def extract_25d_samples(image, mask, patient_id):
+    """Extract 5-slice stacks from 3D volume (skip first/last 2 slices)."""
+    depth = image.shape[0]
+    samples = []
+    
+    for k in range(2, depth - 2):
+        # Stack slices [k-2, k-1, k, k+1, k+2]
+        stack = np.stack([image[k-2], image[k-1], image[k], image[k+1], image[k+2]], axis=0)
+        target = mask[k:k+1]  # Keep as (1, H, W)
         
-    Returns:
-        Tuple of (volume, mask) as numpy arrays
-    """
-    logger.info(f"Loading volume from {path}...")
-    # TODO: Load using SimpleITK or nibabel
-    pass
-
-
-def create_25d_slices(volume: np.ndarray, 
-                      mask: np.ndarray,
-                      window: int = 3) -> Tuple[List, List]:
-    """
-    Create 2.5D slices from 3D volume.
-    2.5D = [slice-1, slice, slice+1] stacked as 3 channels
+        samples.append({
+            'stack': stack,
+            'target': target,
+            'patient_id': patient_id,
+            'slice': k,
+            'has_nodule': (np.max(target) > 0),
+        })
     
-    Args:
-        volume: 3D CT volume (D, H, W)
-        mask: 3D segmentation mask (D, H, W)
-        window: Number of slices to use (typically 3)
+    return samples
+
+
+def save_25d_samples(samples, output_dir, patient_id):
+    """Save 2.5D samples as .npz files."""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    for sample in samples:
+        k = sample['slice']
+        filename = f"{patient_id}_slice_{k:04d}.npz"
+        filepath = output_path / filename
         
-    Returns:
-        Lists of 2.5D images and masks
-    """
-    depth = volume.shape[0]
-    slices_25d = []
-    masks_25d = []
+        np.savez_compressed(
+            filepath,
+            image=sample['stack'].astype(np.float32),
+            mask=sample['target'].astype(np.uint8)
+        )
     
-    logger.info(f"Creating 2.5D slices with window={window}...")
-    
-    # TODO:
-    # For each slice d in depth:
-    #   - Extract neighboring slices [d-1, d, d+1]
-    #   - Handle boundary cases
-    #   - Stack as 3-channel image
-    #   - Append to lists
-    
-    return slices_25d, masks_25d
+    return len(samples)
 
 
-def build_dataset(input_dir: str, output_dir: str, test_split: float = 0.2):
-    """
-    Build complete 2.5D dataset from 3D volumes.
+def process_patient(image_path, mask_path, patient_id, output_dir):
+    """Load volume → extract samples → save."""
+    print(f"Processing {patient_id}...")
     
-    Args:
-        input_dir: Directory with prepared 3D volumes
-        output_dir: Directory to save 2.5D dataset
-        test_split: Fraction of data for test set
-    """
-    logger.info(f"Building 2.5D dataset from {input_dir}...")
+    image, mask = load_volume(image_path, mask_path)
+    print(f"  Shape: {image.shape}")
     
-    # TODO:
-    # 1. List all volumes in input_dir
-    # 2. For each volume:
-    #    - Load 3D volume and mask
-    #    - Create 2.5D slices
-    #    - Save to HDF5 or NPZ
-    # 3. Create train/val/test split
-    # 4. Save split information (JSON)
+    samples = extract_25d_samples(image, mask, patient_id)
+    print(f"  Extracted {len(samples)} samples")
+    
+    # Count nodule vs background
+    with_nodule = sum(1 for s in samples if s['has_nodule'])
+    print(f"    With nodule: {with_nodule}")
+    print(f"    Background: {len(samples) - with_nodule}")
+    
+    num_saved = save_25d_samples(samples, output_dir, patient_id)
+    print(f"✓ Saved {num_saved} samples\n")
+    
+    return num_saved
+
+
+def find_volume_pairs(input_dir):
+    """Find all matching image/mask pairs in directory.
+    
+    Expects files named: {patient_id}_image.npy and {patient_id}_mask.npy
+    """
+    input_path = Path(input_dir)
+    pairs = []
+    
+    image_files = sorted(input_path.glob('*_image.npy'))
+    print(f"Found {len(image_files)} image files\n")
+    
+    for image_file in image_files:
+        patient_id = image_file.stem.replace('_image', '')
+        mask_file = input_path / f'{patient_id}_mask.npy'
+        
+        if mask_file.exists():
+            pairs.append((str(image_file), str(mask_file), patient_id))
+        else:
+            print(f"Warning: No mask found for {patient_id}")
+    
+    return pairs
 
 
 def main():
-    """Main execution: build 2.5D dataset"""
-    logger.basicConfig(level=logging.INFO)
+    """Build 2.5D dataset from 3D volumes."""
+    parser = argparse.ArgumentParser(description="Build 2.5D dataset from 3D volumes")
+    parser.add_argument('--input', type=str, required=True,
+                       help='Directory with 3D volumes (patient_id_image.npy, patient_id_mask.npy)')
+    parser.add_argument('--output', type=str, default='data/lidc_25d',
+                       help='Output directory for 2.5D samples')
+    parser.add_argument('--patient', type=str, default=None,
+                       help='Process single patient (optional)')
     
-    input_dir = "data/lidc_3d"
-    output_dir = "data/lidc_25d"
+    args = parser.parse_args()
     
-    build_dataset(input_dir, output_dir)
+    input_dir = Path(args.input)
+    if not input_dir.exists():
+        print(f"Error: Input directory not found: {input_dir}")
+        return 1
+    
+    print("="*60)
+    print("2.5D Dataset Builder")
+    print("="*60 + "\n")
+    
+    if args.patient:
+        # Process single patient
+        image_path = input_dir / f'{args.patient}_image.npy'
+        mask_path = input_dir / f'{args.patient}_mask.npy'
+        
+        if not image_path.exists() or not mask_path.exists():
+            print(f"Error: Patient files not found")
+            return 1
+        
+        process_patient(str(image_path), str(mask_path), args.patient, args.output)
+        
+    else:
+        # Process all patients
+        pairs = find_volume_pairs(args.input)
+        
+        if not pairs:
+            print("Error: No volume pairs found!")
+            return 1
+        
+        print(f"Processing {len(pairs)} patients...\n")
+        
+        total_samples = 0
+        for image_path, mask_path, patient_id in pairs:
+            num = process_patient(image_path, mask_path, patient_id, args.output)
+            total_samples += num
+        
+        print("="*60)
+        print(f"✓ Done! Created {total_samples} total samples")
+        print("="*60)
+    
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    exit(main())

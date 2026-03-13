@@ -1,193 +1,216 @@
 """
 Module: extract_roi.py
-Purpose: Extract Region of Interest (ROI) from predicted masks
-         Generate bounding boxes around segmented nodules
-         Save ROI crops for downstream analysis/classification
+Purpose: Extract ROI patches from predicted lung nodule masks
 
-Typical workflow:
-1. Load segmentation mask from model
-2. Find connected components (individual nodules)
-3. For each nodule:
-   - Compute bounding box
-   - Extract ROI from original image
-   - Optionally pad/expand ROI
-   - Save ROI
-4. Create ROI metadata file
+Simple workflow:
+1. Load CT volume and binary nodule mask
+2. Find individual nodules (connected components)
+3. Extract bounding box around each nodule
+4. Crop ROI patch with optional padding
+5. Save crops and basic metadata
 """
 
-import os
-from typing import List, Tuple
-import logging
+import json
+from pathlib import Path
+from typing import Tuple
 
 import numpy as np
-from scipy import ndimage
-
-logger = logging.getLogger(__name__)
+from scipy.ndimage import label
 
 
-class ROI:
-    """Represents a Region of Interest (bounding box)."""
-    
-    def __init__(self, label_id: int, 
-                 bounds: Tuple[int, int, int, int, int, int],
-                 center: Tuple[float, float, float],
-                 volume: float):
-        """
-        Args:
-            label_id: ID of this ROI
-            bounds: (z_min, z_max, y_min, y_max, x_min, x_max)
-            center: (z, y, x) coordinates of center
-            volume: Volume of ROI in voxels
-        """
-        self.label_id = label_id
-        self.bounds = bounds
-        self.center = center
-        self.volume = volume
-    
-    def to_dict(self):
-        """Convert to dictionary for JSON serialization."""
-        return {
-            'label_id': int(self.label_id),
-            'bounds': self.bounds,
-            'center': self.center,
-            'volume': float(self.volume),
-        }
-
-
-def find_connected_components(mask: np.ndarray) -> Tuple[np.ndarray, int]:
+def find_nodules(mask: np.ndarray) -> Tuple[np.ndarray, int]:
     """
-    Find connected components in binary mask.
+    Find individual nodules in binary mask using connected components.
     
     Args:
-        mask: Binary segmentation mask (3D array)
+        mask: Binary segmentation mask (3D array, shape: D x H x W)
         
     Returns:
-        Tuple of (labeled_array, num_components)
+        labeled_mask: Array with each nodule labeled with unique ID (1, 2, 3...)
+        num_nodules: Number of nodules found
     """
-    logger.info("Finding connected components...")
-    
-    # TODO: Use scipy.ndimage.label
-    # labeled_array, num_components = ndimage.label(mask)
-    
-    return None, 0
+    labeled_mask, num_nodules = label(mask)
+    print(f"Found {num_nodules} nodules")
+    return labeled_mask, num_nodules
 
 
-def extract_bounding_box(labeled_mask: np.ndarray, label: int) -> Tuple[int, ...]:
+def get_bounding_box(labeled_mask: np.ndarray, nodule_id: int) -> Tuple[int, ...]:
     """
-    Extract bounding box coordinates for a labeled region.
+    Get bounding box for a single nodule.
     
     Args:
-        labeled_mask: Array with labeled components
-        label: Component label ID
+        labeled_mask: Labeled mask from find_nodules()
+        nodule_id: ID of the nodule (1, 2, 3...)
         
     Returns:
-        Tuple of (z_min, z_max, y_min, y_max, x_min, x_max)
+        (z_min, z_max, y_min, y_max, x_min, x_max) - bounding box coordinates
     """
-    # TODO: Find min/max indices for this label
-    # positions = np.where(labeled_mask == label)
-    # z_min, z_max = positions[0].min(), positions[0].max()
-    # etc.
+    indices = np.where(labeled_mask == nodule_id)
     
-    return (0, 0, 0, 0, 0, 0)  # Placeholder
+    z_min, z_max = indices[0].min(), indices[0].max()
+    y_min, y_max = indices[1].min(), indices[1].max()
+    x_min, x_max = indices[2].min(), indices[2].max()
+    
+    return (z_min, z_max, y_min, y_max, x_min, x_max)
 
 
-def extract_roi_from_image(image: np.ndarray, 
-                          bounds: Tuple[int, ...],
-                          padding: int = 10) -> np.ndarray:
+def extract_roi(volume: np.ndarray, bbox: Tuple[int, ...], 
+                padding: int = 10) -> np.ndarray:
     """
-    Extract ROI crop from image using bounding box.
+    Extract ROI crop from CT volume given a bounding box.
     
     Args:
-        image: 3D CT image
-        bounds: Bounding box (z_min, z_max, y_min, y_max, x_min, x_max)
-        padding: Number of voxels to pad bbox
+        volume: 3D CT volume (D x H x W)
+        bbox: Bounding box (z_min, z_max, y_min, y_max, x_min, x_max)
+        padding: Extra voxels to include around bbox (default 10)
         
     Returns:
-        ROI crop
+        roi: 3D crop of the nodule region
     """
-    z_min, z_max, y_min, y_max, x_min, x_max = bounds
+    z_min, z_max, y_min, y_max, x_min, x_max = bbox
     
-    # TODO: Apply padding
+    # Add padding and clip to volume boundaries
     z_min = max(0, z_min - padding)
-    z_max = min(image.shape[0], z_max + padding)
+    z_max = min(volume.shape[0] - 1, z_max + padding)
     y_min = max(0, y_min - padding)
-    y_max = min(image.shape[1], y_max + padding)
+    y_max = min(volume.shape[1] - 1, y_max + padding)
     x_min = max(0, x_min - padding)
-    x_max = min(image.shape[2], x_max + padding)
+    x_max = min(volume.shape[2] - 1, x_max + padding)
     
-    # Extract
-    roi = image[z_min:z_max+1, y_min:y_max+1, x_min:x_max+1]
+    roi = volume[z_min:z_max+1, y_min:y_max+1, x_min:x_max+1]
     
     return roi
 
 
-def extract_all_rois(image: np.ndarray,
-                     mask: np.ndarray,
-                     min_volume: int = 50) -> List[ROI]:
+def extract_all_rois(volume: np.ndarray, mask: np.ndarray, 
+                     padding: int = 10) -> dict:
     """
-    Extract all ROIs from an image/mask pair.
+    Extract all nodule ROIs from a CT volume.
     
     Args:
-        image: 3D CT image
+        volume: 3D CT volume
         mask: Binary segmentation mask
-        min_volume: Minimum voxel volume to keep
+        padding: Padding around each nodule (default 10)
         
     Returns:
-        List of ROI objects
+        Dictionary with extracted ROIs and metadata
     """
-    logger.info("Extracting ROIs from mask...")
+    if volume.shape != mask.shape:
+        raise ValueError(f"Shape mismatch: volume {volume.shape} vs mask {mask.shape}")
     
-    # Find connected components
-    labeled_mask, num_components = find_connected_components(mask)
+    labeled_mask, num_nodules = find_nodules(mask)
     
-    rois = []
+    rois = {}
+    metadata = []
     
-    for label_id in range(1, num_components + 1):
-        # TODO:
-        # 1. Extract bounding box
-        # 2. Compute volume and center
-        # 3. Filter by minimum volume
-        # 4. Create ROI object
-        # 5. Append to list
+    for nodule_id in range(1, num_nodules + 1):
+        # Get bounding box
+        bbox = get_bounding_box(labeled_mask, nodule_id)
         
-        pass
+        # Extract ROI
+        roi = extract_roi(volume, bbox, padding)
+        roi_mask = extract_roi(mask.astype(np.uint8), bbox, padding)
+        
+        # Compute statistics
+        nodule_voxels = np.where(labeled_mask == nodule_id)
+        center = (
+            float(nodule_voxels[0].mean()),
+            float(nodule_voxels[1].mean()),
+            float(nodule_voxels[2].mean())
+        )
+        num_voxels = int((labeled_mask == nodule_id).sum())
+        
+        # Store ROI
+        roi_name = f"roi_{nodule_id:03d}"
+        rois[roi_name] = {
+            'volume': roi,
+            'mask': roi_mask,
+            'bbox': bbox,
+            'center': center,
+            'num_voxels': num_voxels,
+        }
+        
+        metadata.append({
+            'roi_id': nodule_id,
+            'bbox': bbox,
+            'center': center,
+            'num_voxels': num_voxels,
+        })
+        
+        print(f"  ROI {nodule_id}: bbox {bbox}, voxels {num_voxels}")
     
-    return rois
+    return {'rois': rois, 'metadata': metadata}
 
 
-def save_rois(rois: List[ROI], image: np.ndarray, mask: np.ndarray,
-              output_dir: str, case_id: str):
+def save_rois(roi_data: dict, output_dir: str, patient_id: str):
     """
-    Save all ROIs with metadata.
+    Save extracted ROIs to disk.
+    
+    Creates folder: output_dir/patient_id/
+    Files: roi_001_volume.npy, roi_001_mask.npy, roi_002_volume.npy, etc.
     
     Args:
-        rois: List of ROI objects
-        image: Original 3D image
-        mask: Segmentation mask
-        output_dir: Directory to save ROIs
-        case_id: Patient/case identifier
+        roi_data: Output from extract_all_rois()
+        output_dir: Base directory for saving
+        patient_id: Patient identifier (used as subfolder)
     """
-    logger.info(f"Saving {len(rois)} ROIs to {output_dir}...")
+    output_path = Path(output_dir) / patient_id
+    output_path.mkdir(parents=True, exist_ok=True)
     
-    # TODO:
-    # 1. Create case-specific subdirectory
-    # 2. For each ROI:
-    #    - Extract crop from image
-    #    - Save as NIfTI or NPZ
-    #    - Save corresponding mask crop
-    # 3. Save metadata JSON with all ROI info
-
-
-def main():
-    """Main ROI extraction execution."""
-    logging.basicConfig(level=logging.INFO)
+    print(f"\nSaving ROIs to {output_path}")
     
-    # TODO:
-    # 1. Load prediction mask
-    # 2. Load original image
-    # 3. Extract all ROIs
-    # 4. Save ROIs and metadata
+    for roi_name, roi_info in roi_data['rois'].items():
+        roi_id = int(roi_name.split('_')[1])
+        
+        # Save volume and mask as .npy
+        vol_file = output_path / f"roi_{roi_id:03d}_volume.npy"
+        np.save(str(vol_file), roi_info['volume'])
+        
+        mask_file = output_path / f"roi_{roi_id:03d}_mask.npy"
+        np.save(str(mask_file), roi_info['mask'])
+        
+        print(f"  Saved {vol_file.name}")
+    
+    # Save metadata as JSON
+    meta_file = output_path / "roi_metadata.json"
+    with open(meta_file, 'w') as f:
+        json.dump({
+            'patient_id': patient_id,
+            'num_rois': len(roi_data['rois']),
+            'rois': roi_data['metadata']
+        }, f, indent=2)
+    
+    print(f"  Saved {meta_file.name}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Extract ROIs from nodule masks")
+    parser.add_argument('--volume', type=str, required=True,
+                       help='Path to 3D CT volume (.npy)')
+    parser.add_argument('--mask', type=str, required=True,
+                       help='Path to nodule mask (.npy)')
+    parser.add_argument('--output', type=str, default='outputs/rois',
+                       help='Output directory')
+    parser.add_argument('--padding', type=int, default=10,
+                       help='Padding around nodule')
+    parser.add_argument('--patient-id', type=str, default='patient_001',
+                       help='Patient identifier')
+    
+    args = parser.parse_args()
+    
+    # Load data
+    print(f"Loading volume: {args.volume}")
+    print(f"Loading mask: {args.mask}")
+    volume = np.load(args.volume)
+    mask = np.load(args.mask)
+    
+    # Extract ROIs
+    print("\nExtracting ROIs...")
+    roi_data = extract_all_rois(volume, mask, padding=args.padding)
+    
+    # Save ROIs
+    save_rois(roi_data, args.output, args.patient_id)
+    
+    print("\n✓ ROI extraction complete")
