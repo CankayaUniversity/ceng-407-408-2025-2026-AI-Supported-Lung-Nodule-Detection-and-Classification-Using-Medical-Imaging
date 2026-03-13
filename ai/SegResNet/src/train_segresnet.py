@@ -294,39 +294,53 @@ def main():
     logger.info(f"Batch size: {config['training']['batch_size']}")
     logger.info(f"Epochs: {config['training']['num_epochs']}\n")
     
-    # TODO: Load data
-    # from dataset import LIDC25DDataset
-    # from transforms import get_train_transforms, get_val_transforms
-    # from torch.utils.data import DataLoader
-    #
-    # train_dataset = LIDC25DDataset(config['data']['train_dir'], transform=get_train_transforms())
-    # val_dataset = LIDC25DDataset(config['data']['val_dir'], transform=get_val_transforms())
-    # train_loader = DataLoader(train_dataset, batch_size=config['training']['batch_size'], shuffle=True)
-    # val_loader = DataLoader(val_dataset, batch_size=config['training']['batch_size'], shuffle=False)
+    # Load data
+    from dataset import LIDC25DDataset
+    from transforms import get_train_transforms, get_val_transforms
+    from torch.utils.data import DataLoader
     
-    # Placeholder: Comment indicates where data loading goes
-    logger.warning("TODO: Implement data loading from config paths")
+    logger.info(f"Loading training data from {config['data']['train_dir']}")
+    logger.info(f"Loading validation data from {config['data']['val_dir']}")
     
-    # Training loop (placeholder)
+    train_dataset = LIDC25DDataset(config['data']['train_dir'], transform=get_train_transforms())
+    val_dataset = LIDC25DDataset(config['data']['val_dir'], transform=get_val_transforms())
+    
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config['training']['batch_size'],
+        shuffle=True,
+        num_workers=config['dataloader']['num_workers'],
+        pin_memory=config['dataloader']['pin_memory']
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config['training']['batch_size'],
+        shuffle=False,
+        num_workers=config['dataloader']['num_workers'],
+        pin_memory=config['dataloader']['pin_memory']
+    )
+    
+    logger.info(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
+    
+    # Training loop
     best_dice = 0.0
     checkpoint_dir = config['training']['checkpoint_dir']
     
     for epoch in range(config['training']['num_epochs']):
         logger.info(f"\nEpoch {epoch+1}/{config['training']['num_epochs']}")
         
-        # TODO: Uncomment when data loading is implemented
-        # train_loss, train_dice = train_one_epoch(model, train_loader, loss_fn, optimizer, device)
-        # val_loss, val_dice = validate(model, val_loader, loss_fn, device)
+        train_loss, train_dice = train_one_epoch(model, train_loader, loss_fn, optimizer, device)
+        val_loss, val_dice = validate(model, val_loader, loss_fn, device)
         
-        # logger.info(f"Train Loss: {train_loss:.4f}, Train Dice: {train_dice:.4f}")
-        # logger.info(f"Val Loss: {val_loss:.4f}, Val Dice: {val_dice:.4f}")
+        logger.info(f"Train Loss: {train_loss:.4f}, Train Dice: {train_dice:.4f}")
+        logger.info(f"Val Loss: {val_loss:.4f}, Val Dice: {val_dice:.4f}")
         
-        # if val_dice > best_dice:
-        #     best_dice = val_dice
-        #     logger.info(f"✓ Best model updated (Dice: {best_dice:.4f})")
-        #     save_checkpoint(model, optimizer, epoch, {'val_dice': val_dice}, checkpoint_dir)
+        if val_dice > best_dice:
+            best_dice = val_dice
+            logger.info(f"✓ Best model updated (Dice: {best_dice:.4f})")
+            save_checkpoint(model, optimizer, epoch, {'val_dice': val_dice}, checkpoint_dir)
         
-        # scheduler.step(val_dice)
+        scheduler.step(val_dice)
         
         logger.info("Placeholder: Data loading and training loop to be implemented")
     

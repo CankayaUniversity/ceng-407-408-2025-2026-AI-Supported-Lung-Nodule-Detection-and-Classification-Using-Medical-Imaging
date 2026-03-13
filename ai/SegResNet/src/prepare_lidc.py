@@ -95,46 +95,78 @@ class LIDCProcessor:
     
     def read_nodule_annotations(self, annotation_file: str) -> List[dict]:
         """
-        Read nodule annotations from file.
+        Read nodule annotations from LIDC XML file.
         
-        TODO: This needs project-specific adjustment!
-        Different LIDC sources have different annotation formats:
-        - XML files (LIDC standard): Use xml.etree or pylidc library
-        - CSV files: Use pandas.read_csv()
-        - JSON files: Use json.load()
-        - numpy arrays: Use np.load()
-        
-        Current implementation is a placeholder that expects:
-        A list of dicts with keys: 'z', 'y', 'x', 'radius' (in mm)
+        Parses LIDC standard XML format from Radiologist Annotations.
+        Extracts nodule center coordinates and radius from contour points.
         
         Args:
-            annotation_file: Path to annotation file
+            annotation_file: Path to LIDC XML annotation file
             
         Returns:
-            List of nodule dictionaries with coordinates
+            List of nodule dictionaries with keys: 'z', 'y', 'x', 'radius' (in mm)
         """
-        logger.info(f"Reading annotations from {annotation_file}...")
+        import xml.etree.ElementTree as ET
+        
+        logger.info(f"Reading LIDC annotations from {annotation_file}...")
         
         if not os.path.exists(annotation_file):
             logger.warning(f"Annotation file not found: {annotation_file}")
             return []
         
-        # TODO: Implement annotation parsing based on your data format
-        # Example for XML (LIDC standard):
-        # import xml.etree.ElementTree as ET
-        # tree = ET.parse(annotation_file)
-        # root = tree.getroot()
-        # nodules = []
-        # for nodule_elem in root.findall('.//nodule'):
-        #     roi_info = nodule_elem.find('roi')
-        #     if roi_info is not None:
-        #         z = int(roi_info.find('imageZposition').text)
-        #         # Extract x, y coordinates from contour points
-        #         nodules.append({'z': z, 'y': y_center, 'x': x_center, 'radius': radius})
-        # return nodules
-        
-        # Placeholder: return empty list
-        return []
+        try:
+            tree = ET.parse(annotation_file)
+            root = tree.getroot()
+            nodules = []
+            
+            # Find all nodule elements in XML
+            for nodule_elem in root.findall('.//unblindedReadNodule'):
+                try:
+                    # Get image Z position
+                    z_elem = nodule_elem.find('imageZposition')
+                    if z_elem is None:
+                        continue
+                    z = float(z_elem.text)
+                    
+                    # Get ROI (contour points)
+                    roi_elem = nodule_elem.find('roi')
+                    if roi_elem is None:
+                        continue
+                    
+                    # Extract x, y from contour points
+                    edgeMap = roi_elem.find('edgeMap')
+                    if edgeMap is not None:
+                        xCoords = []
+                        yCoords = []
+                        for point in edgeMap.findall('.//point'):
+                            x_text = point.find('x')
+                            y_text = point.find('y')
+                            if x_text is not None and y_text is not None:
+                                xCoords.append(float(x_text.text))
+                                yCoords.append(float(y_text.text))
+                        
+                        if xCoords and yCoords:
+                            x_center = np.mean(xCoords)
+                            y_center = np.mean(yCoords)
+                            radius = (max(xCoords) - min(xCoords)) / 2.0
+                            
+                            nodules.append({
+                                'z': z,
+                                'y': y_center,
+                                'x': x_center,
+                                'radius': radius
+                            })
+                
+                except Exception as e:
+                    logger.warning(f"Error parsing nodule: {e}")
+                    continue
+            
+            logger.info(f"  Found {len(nodules)} nodules")
+            return nodules
+            
+        except Exception as e:
+            logger.error(f"Failed to parse XML: {e}")
+            return []
     
     def create_nodule_mask(self, volume_shape: Tuple, 
                           nodules: List[dict],
@@ -163,7 +195,7 @@ class LIDCProcessor:
                 radius_mm = nodule.get('radius', 5.0)
                 
                 # Convert mm to voxel coordinates
-                # TODO: Adjust if spacing order is different
+                # spacing is (z_spacing, y_spacing, x_spacing)
                 z_idx = int(z_center / spacing[0])
                 y_idx = int(y_center / spacing[1])
                 x_idx = int(x_center / spacing[2])
