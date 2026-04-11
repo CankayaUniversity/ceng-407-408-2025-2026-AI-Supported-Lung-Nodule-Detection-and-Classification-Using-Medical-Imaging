@@ -18,7 +18,7 @@ sys.path.append("Pulmo/src")
 import pydicom
 import cv2
 
-pat_id = "1"
+pat_id = "14"
 pat_id = pat_id.zfill(4)  # ID'yi 4 haneli yap (örneğin "0002")
 
 # PyDrive2 kimlik doğrulama (settings.yaml ile otomatik yapılandırma)
@@ -327,10 +327,19 @@ elif(filename.endswith('.npz')):
     with torch.no_grad():
         output = model(input_tensor)
         probabilities = torch.sigmoid(output)
+        
         if probabilities.numel() == 1:
             confidence = float(probabilities.item() * 100)
         else:
-            confidence = float(torch.mean(probabilities).item() * 100)
+            # Maske tahmini: Olasılığı 0.5'ten büyük olan pikseller (Nodül alanı)
+            predicted_mask = probabilities > 0.5
+            
+            if predicted_mask.sum() > 0:
+                # Sadece nodül olarak tahmin edilen piksellerin ortalama güvenini al
+                confidence = float(torch.mean(probabilities[predicted_mask]).item() * 100)
+            else:
+                # Eğer model hiçbir yeri nodül olarak bulamadıysa, en şüphelendiği pikselin değerini göster
+                confidence = float(torch.max(probabilities).item() * 100)
 
     # Yan yana 3 panel oluştur
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
@@ -347,7 +356,7 @@ elif(filename.endswith('.npz')):
 
     # --- PANEL 3: Görüntü + Grad-CAM (Modelin Kararı) ---
     axes[2].imshow(image, cmap='gray')
-    cam_plot = axes[2].imshow(cam_map_norm, cmap=grad_cmap, alpha=0.3)
+    cam_plot = axes[2].imshow(cam_map_norm, cmap=grad_cmap, alpha=0.6)
     axes[2].set_title(f"Grad-CAM (Güven: %{confidence:.2f})")
 
     # Renk çubuğu ekle
