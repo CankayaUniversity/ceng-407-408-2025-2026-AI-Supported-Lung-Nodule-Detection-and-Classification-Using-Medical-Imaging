@@ -329,13 +329,33 @@ app.post('/api/seed-dicoms', async (req, res) => {
   }
 });
 
+const SEGMENTATION_MODELS = {
+  best: {
+    label: 'Best SegResNet',
+    file: 'segresnet_25d_best_.pt'
+  },
+  adam: {
+    label: 'Adam 25D',
+    file: 'segresnet_25d_adam.pt'
+  }
+};
+
 // ============ AI ANALYSIS ROUTE ============
 app.post('/api/analyze-dicom/:studyId', async (req, res) => {
   const studyId = req.params.studyId;
-  const topK = Math.min(req.body.top_k || 3, 3);
+  const topK = Math.min(req.body?.top_k || 3, 3);
+  const requestedModelKey = req.body?.modelKey || req.query?.model || 'best';
+  const selectedModel = SEGMENTATION_MODELS[requestedModelKey];
+
+  if (!selectedModel) {
+    return res.status(400).json({
+      success: false,
+      error: `Unknown segmentation model "${requestedModelKey}". Available models: ${Object.keys(SEGMENTATION_MODELS).join(', ')}`
+    });
+  }
   
   try {
-    console.log(`Starting AI analysis for study: ${studyId}`);
+    console.log(`Starting AI analysis for study: ${studyId} with model: ${requestedModelKey}`);
     
     // Get study data to verify it exists
     const study = await getStudy(studyId);
@@ -357,7 +377,7 @@ app.post('/api/analyze-dicom/:studyId', async (req, res) => {
     
     // Prepare paths
     const studyDir = path.join(__dirname, 'uploads', studyId);
-    const modelPath = path.join(__dirname, 'models', 'segresnet_25d_best_.pt');
+    const modelPath = path.join(__dirname, 'models', selectedModel.file);
     const overlaysDir = path.join(__dirname, 'uploads', studyId, 'overlays');
     
     // Check model exists
@@ -435,6 +455,8 @@ app.post('/api/analyze-dicom/:studyId', async (req, res) => {
             bbox: candidate.bbox || null,
             overlayUrl: safeOverlayUrl,
             maskUrl: candidate.maskUrl || null,
+            segmentationModel: requestedModelKey,
+            segmentationModelLabel: selectedModel.label,
             heatmapUrl: null,
             classifierCropUrl: null,
             classifierGradcamUrl: null,
@@ -476,8 +498,8 @@ app.post('/api/analyze-dicom/:studyId', async (req, res) => {
 
           const classifierProbability = candidate.classificationProbability ?? null;
           const classifierNote = candidate.classificationLabel
-            ? `Model prediction - Confidence: ${candidate.confidence}; Classifier: ${candidate.classificationLabel}${classifierProbability ? ` (${classifierProbability})` : ''}`
-            : `Model prediction - Confidence: ${candidate.confidence}`;
+            ? `Model prediction - ${selectedModel.label}; Confidence: ${candidate.confidence}; Classifier: ${candidate.classificationLabel}${classifierProbability ? ` (${classifierProbability})` : ''}`
+            : `Model prediction - ${selectedModel.label}; Confidence: ${candidate.confidence}`;
           const noduleData = {
             study_id: studyId,
             nodule_number: candidate.nodule_number,
@@ -509,6 +531,8 @@ app.post('/api/analyze-dicom/:studyId', async (req, res) => {
           nodule_count: analysisResults.top_candidates,
           candidates: analysisResults.candidates,
           metadata: {
+            segmentation_model: requestedModelKey,
+            segmentation_model_label: selectedModel.label,
             total_slices: analysisResults.num_slices,
             volume_shape: analysisResults.volume_shape,
             total_regions_found: analysisResults.total_candidates_found

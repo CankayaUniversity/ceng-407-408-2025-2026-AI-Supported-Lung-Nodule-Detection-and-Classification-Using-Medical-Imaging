@@ -24,6 +24,7 @@ function NewStudy() {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(0);
   const [previewLoaded, setPreviewLoaded] = useState(false);
+  const [analysisModel, setAnalysisModel] = useState('best');
 
   const handleInputChange = (e) => {
     setFormData({...formData, [e.target.name]: e.target.value});
@@ -267,7 +268,7 @@ function NewStudy() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ top_k: 3 })
+        body: JSON.stringify({ top_k: 3, modelKey: analysisModel })
       });
 
       if (!analysisResponse.ok) {
@@ -445,6 +446,20 @@ function NewStudy() {
           <div className="dashboard-section">
             <h3>AI Analysis</h3>
             <div className="analysis-controls">
+              <div className="analysis-model-field">
+                <label htmlFor="analysis-model">Segmentation Model</label>
+                <select
+                  id="analysis-model"
+                  value={analysisModel}
+                  onChange={(e) => setAnalysisModel(e.target.value)}
+                  className="new-study-input analysis-model-select"
+                  disabled={isProcessing}
+                >
+                  <option value="best">Best SegResNet</option>
+                  <option value="adam">Adam 25D</option>
+                </select>
+              </div>
+
               <button 
                 className="start-analysis-btn" 
                 onClick={startAnalysis} 

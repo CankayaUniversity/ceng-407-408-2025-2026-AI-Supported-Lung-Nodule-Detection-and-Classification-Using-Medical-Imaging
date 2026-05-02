@@ -14,6 +14,30 @@ import os
 logger = logging.getLogger(__name__)
 
 
+def _get_state_dict_and_config(checkpoint):
+    """Return a checkpoint state_dict plus optional metadata/config."""
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        return checkpoint['model_state_dict'], checkpoint
+    return checkpoint, {}
+
+
+def _infer_init_filters(state_dict, checkpoint_meta: Dict) -> int:
+    """Infer SegResNet init_filters without changing older checkpoints."""
+    config = checkpoint_meta.get('config') if isinstance(checkpoint_meta, dict) else None
+    if isinstance(config, dict):
+        init_filters = config.get('model_init_filters')
+        if init_filters:
+            return int(init_filters)
+
+    if isinstance(state_dict, dict):
+        for key in ('convInit.conv.weight', 'module.convInit.conv.weight'):
+            weight = state_dict.get(key)
+            if weight is not None and hasattr(weight, 'shape') and len(weight.shape) > 0:
+                return int(weight.shape[0])
+
+    return 8
+
+
 def load_segmentation_model(model_path: str, device: str = None) -> SegResNet:
     """
     Load SegResNet model from checkpoint.
@@ -35,25 +59,27 @@ def load_segmentation_model(model_path: str, device: str = None) -> SegResNet:
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model checkpoint not found at {model_path}")
     
-    # Create model with exact architecture from specification
+    # Load checkpoint first so the architecture can match each checkpoint.
+    checkpoint = torch.load(model_path, map_location=device)
+    state_dict, checkpoint_meta = _get_state_dict_and_config(checkpoint)
+    init_filters = _infer_init_filters(state_dict, checkpoint_meta)
+
+    logger.info(
+        "Model checkpoint info: epoch=%s, best_dice=%s, init_filters=%s",
+        checkpoint_meta.get('epoch') if isinstance(checkpoint_meta, dict) else None,
+        checkpoint_meta.get('best_dice') if isinstance(checkpoint_meta, dict) else None,
+        init_filters,
+    )
+
+    # Create model with the same architecture, preserving the checkpoint's width.
     model = SegResNet(
         spatial_dims=2,
         in_channels=5,
         out_channels=1,
-        init_filters=8,
+        init_filters=init_filters,
         blocks_down=(1, 2, 2, 4),
         blocks_up=(1, 1, 1),
     )
-    
-    # Load checkpoint
-    checkpoint = torch.load(model_path, map_location=device)
-    
-    # Handle both direct state_dict and wrapped checkpoint
-    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        state_dict = checkpoint['model_state_dict']
-        logger.info(f"Model checkpoint info: epoch={checkpoint.get('epoch')}, best_dice={checkpoint.get('best_dice')}")
-    else:
-        state_dict = checkpoint
     
     # Load state dict
     model.load_state_dict(state_dict)
