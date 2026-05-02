@@ -20,7 +20,7 @@ if (!DB_SERVER && !MASTER_CONNECTION_STRING) {
 }
 
 const masterConfig = {
-  connectionString: MASTER_CONNECTION_STRING || `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=master;Trusted_Connection=yes;`,
+  connectionString: MASTER_CONNECTION_STRING || `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=master;Trusted_Connection=yes;Encrypt=no;TrustServerCertificate=yes;`,
   pool: {
     max: 10,
     min: 0,
@@ -29,7 +29,7 @@ const masterConfig = {
 };
 
 const config = {
-  connectionString: APP_CONNECTION_STRING || `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=${DB_DATABASE};Trusted_Connection=yes;`,
+  connectionString: APP_CONNECTION_STRING || `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=${DB_DATABASE};Trusted_Connection=yes;Encrypt=no;TrustServerCertificate=yes;`,
   pool: {
     max: 10,
     min: 0,

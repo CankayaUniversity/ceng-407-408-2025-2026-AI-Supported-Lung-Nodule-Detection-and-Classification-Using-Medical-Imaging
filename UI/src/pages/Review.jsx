@@ -14,24 +14,30 @@ const WINDOW_PRESETS = {
   soft: { ww: 400, wc: 40, name: 'Soft Tissue' }
 };
 
-// XAI explanation templates based on risk level
-const XAI_EXPLANATIONS = {
-  high: [
-    { feature: 'Irregular margins', confidence: 0.89 },
-    { feature: 'Spiculated appearance', confidence: 0.82 },
-    { feature: 'Solid density pattern', confidence: 0.78 },
-    { feature: 'Size > 8mm', confidence: 0.95 }
-  ],
-  medium: [
-    { feature: 'Part-solid pattern', confidence: 0.72 },
-    { feature: 'Lobulated margins', confidence: 0.68 },
-    { feature: 'Ground-glass component', confidence: 0.65 }
-  ],
-  low: [
-    { feature: 'Smooth margins', confidence: 0.85 },
-    { feature: 'Calcification present', confidence: 0.72 },
-    { feature: 'Stable size', confidence: 0.90 }
-  ]
+const getCandidateSortScore = (candidate) => {
+  const modelScore = Number(candidate?.coordinates?.score);
+  if (Number.isFinite(modelScore)) return modelScore;
+
+  const probability = Number(candidate?.probability);
+  return Number.isFinite(probability) ? probability : 0;
+};
+
+const getCandidateLikelihood = (candidate, candidates) => {
+  const probability = Number(candidate?.probability);
+  return Number.isFinite(probability) ? Math.max(0, Math.min(100, probability * 100)) : 0;
+};
+
+const toBackendAssetUrl = (url) => {
+  if (!url) return null;
+  return url.startsWith('http') ? url : `http://localhost:3001${url}`;
+};
+
+const getClassificationLabel = (candidate) => {
+  const label = candidate?.coordinates?.classificationLabel;
+  if (label) return label;
+  return getCandidateLikelihood(candidate) >= 50
+    ? 'Positive nodule candidate'
+    : 'Negative / likely false positive';
 };
 
 export default function Review(){
@@ -39,6 +45,7 @@ export default function Review(){
   const navigate = useNavigate();
   const viewerRef = useRef(null);
   const viewerInitialized = useRef(false);
+  const initialNoduleSliceDone = useRef(false);
   const dicomFilesRef = useRef([]);
   
   // Core state
@@ -98,6 +105,9 @@ export default function Review(){
   // Nodule state
   const [nodules, setNodules] = useState([]);
   const [selectedNodule, setSelectedNodule] = useState(0);
+  const [markerPositions, setMarkerPositions] = useState({});
+  const [segmentationOverlay, setSegmentationOverlay] = useState(null);
+  const [heatmapOverlay, setHeatmapOverlay] = useState(null);
   
   // Report state
   const [showReportModal, setShowReportModal] = useState(false);
@@ -107,6 +117,132 @@ export default function Review(){
   useEffect(() => {
     console.log('State update - viewerReady:', viewerReady, 'dicomFiles:', dicomFiles.length, 'viewerRef:', !!viewerRef.current);
   }, [viewerReady, dicomFiles.length]);
+
+  const getNoduleImagePoint = useCallback((nodule, image) => {
+    const coords = nodule?.coordinates || {};
+    const pixelX = Number(coords.pixelX);
+    const pixelY = Number(coords.pixelY);
+
+    if (Number.isFinite(pixelX) && Number.isFinite(pixelY)) {
+      return { x: pixelX, y: pixelY };
+    }
+
+    const x = Number(coords.x);
+    const y = Number(coords.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return null;
+    }
+
+    const width = image?.columns || image?.width || 512;
+    const height = image?.rows || image?.height || 512;
+
+    // New results store x/y as percent for legacy UI compatibility.
+    // Older rows may have stored raw pixel coordinates in x/y.
+    if (x >= 0 && x <= 100 && y >= 0 && y <= 100) {
+      return { x: (x / 100) * width, y: (y / 100) * height };
+    }
+
+    return { x, y };
+  }, []);
+
+  const updateMarkerPositions = useCallback(() => {
+    const element = viewerRef.current;
+    if (!element || nodules.length === 0) {
+      setMarkerPositions({});
+      return;
+    }
+
+    try {
+      const enabledElement = cornerstone.getEnabledElement(element);
+      const image = enabledElement?.image;
+      if (!image) return;
+      const wrapperRect = element.parentElement?.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      const elementOffset = wrapperRect
+        ? {
+            x: elementRect.left - wrapperRect.left,
+            y: elementRect.top - wrapperRect.top
+          }
+        : { x: 0, y: 0 };
+
+      const nextPositions = {};
+      nodules.forEach((nodule, index) => {
+        if (nodule.sliceIndex !== currentImageIndex) return;
+
+        const imagePoint = getNoduleImagePoint(nodule, image);
+        if (!imagePoint) return;
+
+        const canvasPoint = cornerstone.pixelToCanvas(element, imagePoint);
+        nextPositions[nodule.id || index] = {
+          left: `${canvasPoint.x + elementOffset.x}px`,
+          top: `${canvasPoint.y + elementOffset.y}px`
+        };
+      });
+
+      setMarkerPositions(nextPositions);
+
+      const overlayNodule =
+        (nodules[selectedNodule]?.sliceIndex === currentImageIndex && nodules[selectedNodule]?.coordinates?.overlayUrl
+          ? nodules[selectedNodule]
+          : nodules.find(nodule => nodule.sliceIndex === currentImageIndex && nodule.coordinates?.overlayUrl));
+      const heatmapNodule =
+        (nodules[selectedNodule]?.sliceIndex === currentImageIndex && nodules[selectedNodule]?.coordinates?.heatmapUrl
+          ? nodules[selectedNodule]
+          : nodules.find(nodule => nodule.sliceIndex === currentImageIndex && nodule.coordinates?.heatmapUrl));
+
+      const imageStyle = () => {
+        const topLeft = cornerstone.pixelToCanvas(element, { x: 0, y: 0 });
+        const bottomRight = cornerstone.pixelToCanvas(element, {
+          x: image.columns || image.width || 512,
+          y: image.rows || image.height || 512
+        });
+        const left = Math.min(topLeft.x, bottomRight.x);
+        const top = Math.min(topLeft.y, bottomRight.y);
+        const width = Math.abs(bottomRight.x - topLeft.x);
+        const height = Math.abs(bottomRight.y - topLeft.y);
+        return {
+          left: `${left + elementOffset.x}px`,
+          top: `${top + elementOffset.y}px`,
+          width: `${width}px`,
+          height: `${height}px`
+        };
+      };
+
+      if (overlayNodule?.coordinates?.overlayUrl) {
+        const overlayUrl = overlayNodule.coordinates.overlayUrl.startsWith('http')
+          ? overlayNodule.coordinates.overlayUrl
+          : `http://localhost:3001${overlayNodule.coordinates.overlayUrl}`;
+
+        setSegmentationOverlay({
+          src: overlayUrl,
+          style: imageStyle()
+        });
+      } else {
+        setSegmentationOverlay(null);
+      }
+
+      if (heatmapNodule?.coordinates?.heatmapUrl) {
+        const heatmapUrl = heatmapNodule.coordinates.heatmapUrl.startsWith('http')
+          ? heatmapNodule.coordinates.heatmapUrl
+          : `http://localhost:3001${heatmapNodule.coordinates.heatmapUrl}`;
+
+        setHeatmapOverlay({
+          src: heatmapUrl,
+          style: imageStyle()
+        });
+      } else {
+        setHeatmapOverlay(null);
+      }
+    } catch (error) {
+      console.error('Error updating nodule marker positions:', error);
+    }
+  }, [currentImageIndex, getNoduleImagePoint, nodules, selectedNodule]);
+
+  const scheduleOverlayUpdate = useCallback(() => {
+    requestAnimationFrame(updateMarkerPositions);
+    setTimeout(updateMarkerPositions, 60);
+    setTimeout(updateMarkerPositions, 180);
+  }, [updateMarkerPositions]);
 
   useEffect(() => {
     loadStudyData();
@@ -144,6 +280,21 @@ export default function Review(){
       loadDicomImage(currentImageIndex);
     }
   }, [currentImageIndex, dicomFiles.length]);
+
+  useEffect(() => {
+    const element = viewerRef.current;
+    if (!element || !viewerReady) return;
+
+    const handleImageRendered = () => scheduleOverlayUpdate();
+    element.addEventListener('cornerstoneimagerendered', handleImageRendered);
+    window.addEventListener('resize', handleImageRendered);
+    scheduleOverlayUpdate();
+
+    return () => {
+      element.removeEventListener('cornerstoneimagerendered', handleImageRendered);
+      window.removeEventListener('resize', handleImageRendered);
+    };
+  }, [scheduleOverlayUpdate, viewerReady]);
 
   // Also load when viewerReady changes
   useEffect(() => {
@@ -187,6 +338,7 @@ export default function Review(){
   // Reset initialization flag when study changes
   useEffect(() => {
     viewerInitialized.current = false;
+    initialNoduleSliceDone.current = false;
   }, [studyId]);
 
   // Initialize cornerstone when dicomFiles are loaded
@@ -300,26 +452,6 @@ export default function Review(){
     return () => window.removeEventListener('resize', handleResize);
   }, [viewerReady]);
 
-  // Mouse wheel scroll for slice navigation
-  useEffect(() => {
-    const element = viewerRef.current;
-    if (!element || dicomFiles.length === 0) return;
-    
-    const handleWheel = (e) => {
-      e.preventDefault();
-      if (e.deltaY > 0) {
-        // Scroll down - next slice
-        setCurrentImageIndex(prev => Math.min(prev + 1, dicomFiles.length - 1));
-      } else {
-        // Scroll up - previous slice
-        setCurrentImageIndex(prev => Math.max(prev - 1, 0));
-      }
-    };
-    
-    element.addEventListener('wheel', handleWheel, { passive: false });
-    return () => element.removeEventListener('wheel', handleWheel);
-  }, [dicomFiles.length]);
-
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -358,7 +490,7 @@ export default function Review(){
           age: studyData.patient_age,
           gender: studyData.patient_gender,
           clinicalInfo: studyData.clinical_note || null,
-          hasPreviousCT: Math.random() > 0.5
+          hasPreviousCT: false
         });
         
         if (studyData.dicomFiles && studyData.dicomFiles.length > 0) {
@@ -372,28 +504,45 @@ export default function Review(){
           console.log('No DICOM files found for this study');
         }
 
-        // Generate enhanced nodules with XAI data
-        const noduleCount = studyData.nodule_count || 0;
-        const locations = ['RUL', 'LUL', 'RML', 'RLL', 'LLL'];
-        const mockNodules = Array.from({ length: noduleCount }, (_, i) => {
-          const risk = i < noduleCount / 3 ? 'high' : i < noduleCount * 2 / 3 ? 'medium' : 'low';
+        // Fetch real nodules from database (from AI analysis)
+        console.log('Fetching nodules from database...');
+        const nodulesList = studyData.nodules || [];
+        
+        const formattedNodules = nodulesList.map((nodule, index) => {
+          const risk = nodule.risk_level || 'medium';
+          const location = nodule.location || 'AI';
+          
           return {
-            id: i + 1,
-            location: locations[i % 5],
-            locationFull: getLocationFullName(locations[i % 5]),
-            size: (6 + i * 2.5).toFixed(1),
-            probability: (0.65 + Math.random() * 0.3).toFixed(2),
+            id: nodule.id || index + 1,
+            nodule_number: nodule.nodule_number || index + 1,
+            location: location,
+            locationFull: getLocationFullName(location),
+            size: (nodule.size_mm || 0).toFixed(1),
+            probability: (nodule.probability || 0).toFixed(2),
             risk: risk,
-            sliceIndex: Math.floor(Math.random() * (studyData.dicomFiles?.length || 1)),
-            reviewed: false,
-            includeInReport: true,
-            notes: '',
-            doctorAssessment: '',
-            xaiExplanations: XAI_EXPLANATIONS[risk],
-            coordinates: { x: 45 + Math.random() * 10, y: 40 + Math.random() * 20 }
+            sliceIndex: nodule.slice_index || 0,
+            reviewed: nodule.reviewed || false,
+            includeInReport: nodule.include_in_report !== false,
+            notes: nodule.notes || '',
+            doctorAssessment: nodule.doctor_assessment || '',
+            xaiExplanations: [],
+            coordinates: nodule.coordinates ? JSON.parse(nodule.coordinates) : { x: 0, y: 0 }
           };
-        });
-        setNodules(mockNodules);
+        }).sort((a, b) => getCandidateSortScore(b) - getCandidateSortScore(a))
+          .map((nodule, index) => ({
+            ...nodule,
+            displayRank: index + 1
+          }));
+        
+        setNodules(formattedNodules);
+        if (!initialNoduleSliceDone.current && formattedNodules.length > 0) {
+          initialNoduleSliceDone.current = true;
+          setSelectedNodule(0);
+          const firstSlice = Number(formattedNodules[0].sliceIndex);
+          if (Number.isInteger(firstSlice) && firstSlice >= 0 && firstSlice < sortedFiles.length) {
+            setCurrentImageIndex(firstSlice);
+          }
+        }
         
         // Mark study as reviewed when opened
         const userId = localStorage.getItem('userId');
@@ -421,7 +570,8 @@ export default function Review(){
       'RML': 'Right Middle Lobe',
       'RLL': 'Right Lower Lobe',
       'LUL': 'Left Upper Lobe',
-      'LLL': 'Left Lower Lobe'
+      'LLL': 'Left Lower Lobe',
+      'AI': 'Model Candidate'
     };
     return names[abbr] || abbr;
   };
@@ -447,6 +597,7 @@ export default function Review(){
       
       // Display immediately without resize delay
       cornerstone.displayImage(viewerRef.current, image);
+      cornerstone.resize(viewerRef.current, true);
       
       // Apply current viewport settings (preserve zoom and window/level between slices)
       const viewport = cornerstone.getViewport(viewerRef.current);
@@ -458,6 +609,7 @@ export default function Review(){
       }
       
       enableImageTools(viewerRef.current);
+      scheduleOverlayUpdate();
     } catch (error) {
       console.error('Error loading DICOM image:', error);
     }
@@ -474,6 +626,7 @@ export default function Review(){
         viewport.voi.windowWidth = preset.ww;
         viewport.voi.windowCenter = preset.wc;
         cornerstone.setViewport(viewerRef.current, viewport);
+        scheduleOverlayUpdate();
       }
     }
   };
@@ -491,6 +644,7 @@ export default function Review(){
           cornerstone.setViewport(viewerRef.current, viewport);
           setZoom(1);
           applyWindowPreset('lung');
+          scheduleOverlayUpdate();
         }
       } catch (e) {
         console.error('Error resetting view:', e);
@@ -506,6 +660,7 @@ export default function Review(){
       if (viewport) {
         viewport.scale = newZoom;
         cornerstone.setViewport(viewerRef.current, viewport);
+        scheduleOverlayUpdate();
       }
     }
   };
@@ -703,7 +858,7 @@ export default function Review(){
                   <h4>AI Analysis</h4>
                   <div className="ai-stats-list">
                     <div className="ai-stat-row">
-                      <span className="ai-stat-label">Total Nodules</span>
+                      <span className="ai-stat-label">AI Candidates</span>
                       <span className="ai-stat-value">{study.noduleCount}</span>
                     </div>
                     <div className="ai-stat-row">
@@ -720,9 +875,9 @@ export default function Review(){
                     </div>
                     {nodules.length > 0 && (
                       <div className="ai-stat-row">
-                        <span className="ai-stat-label">Largest</span>
+                        <span className="ai-stat-label">Largest Mask</span>
                         <span className="ai-stat-value">
-                          {Math.max(...nodules.map(n => parseFloat(n.size))).toFixed(1)} mm ({nodules.reduce((max, n) => parseFloat(n.size) > parseFloat(max.size) ? n : max, nodules[0]).location})
+                          {Math.max(...nodules.map(n => parseFloat(n.size))).toFixed(1)} px ({nodules.reduce((max, n) => parseFloat(n.size) > parseFloat(max.size) ? n : max, nodules[0]).location})
                         </span>
                       </div>
                     )}
@@ -765,7 +920,7 @@ export default function Review(){
             </div>
           </div>
 
-          <div className="viewer-wrapper">
+          <div className={`viewer-wrapper ${showHeatmap ? 'heat-active' : ''}`}>
             {dicomFiles.length > 0 ? (
               <>
                 <div 
@@ -776,18 +931,26 @@ export default function Review(){
                   style={{ width: '100%', height: '600px', minHeight: '600px', background: '#000' }} 
                 />
                 {imageLoading && <div className="image-loading-overlay"><div className="loading-spinner small"></div></div>}
-                
-                {showSegmentation && nodules.map((nodule, i) => (
-                  nodule.sliceIndex === currentImageIndex && (
-                    <div key={nodule.id} className={`nodule-marker ${nodule.risk} ${selectedNodule === i ? 'selected' : ''}`}
-                      style={{ left: `${nodule.coordinates.x}%`, top: `${nodule.coordinates.y}%` }}
-                      onClick={() => goToNoduleSlice(nodule, i)}>
-                      <span className="marker-label">#{nodule.id}</span>
-                    </div>
-                  )
-                ))}
 
-                {showHeatmap && <div className="heatmap-overlay"><div className="heatmap-gradient" /></div>}
+                {showSegmentation && segmentationOverlay && (
+                  <img
+                    className="segmentation-overlay-image"
+                    src={segmentationOverlay.src}
+                    style={segmentationOverlay.style}
+                    onError={() => setSegmentationOverlay(null)}
+                    alt=""
+                  />
+                )}
+                
+                {showHeatmap && heatmapOverlay && (
+                  <img
+                    className="heatmap-overlay-image"
+                    src={heatmapOverlay.src}
+                    style={heatmapOverlay.style}
+                    onError={() => setHeatmapOverlay(null)}
+                    alt=""
+                  />
+                )}
 
                 <div className="viewer-overlay">
                   <div className="overlay-top-left"><span>{study.patientName}</span><span>{study.patientID}</span></div>
@@ -825,27 +988,28 @@ export default function Review(){
 
         {/* Right Panel - Nodules */}
         <div className="review-right-panel">
-              <div className="panel-header"><h3>Nodules ({nodules.length})</h3></div>
+              <div className="panel-header"><h3>AI Candidates ({nodules.length})</h3></div>
               <div className="nodules-list">
                 {nodules.length > 0 ? nodules.map((nodule, i) => (
                   <div key={nodule.id} className={`nodule-item ${selectedNodule === i ? 'selected' : ''} ${nodule.reviewed ? 'reviewed' : ''}`}
                     onClick={() => goToNoduleSlice(nodule, i)}>
                     <div className="nodule-item-header">
-                      <span className="nodule-number">#{nodule.id}</span>
-                      <span className={`risk-badge ${nodule.risk}`}>{nodule.risk.toUpperCase()}</span>
+                      <span className="nodule-number">#{nodule.displayRank || i + 1}</span>
+                      <span className={`risk-badge ${nodule.risk}`}>{getCandidateLikelihood(nodule, nodules).toFixed(0)}%</span>
                     </div>
                     <div className="nodule-item-info">
-                      <span>{nodule.location} - {nodule.size}mm</span>
+                      <span>Slice {nodule.sliceIndex + 1} - {nodule.size}px mask</span>
+                      <span>{getCandidateLikelihood(nodule, nodules).toFixed(0)}% likelihood</span>
                     </div>
                   </div>
-                )) : <div className="no-nodules">No nodules detected</div>}
+                )) : <div className="no-nodules">No AI candidates detected</div>}
               </div>
 
               {nodules.length > 0 && currentNodule && (
                 <div className="nodule-details">
                   <div className="details-header">
-                    <h4>Nodule #{currentNodule.id}</h4>
-                    <span className={`risk-indicator ${currentNodule.risk}`}>{currentNodule.risk.toUpperCase()}</span>
+                    <h4>AI Candidate #{currentNodule.displayRank || selectedNodule + 1}</h4>
+                    <span className={`risk-indicator ${currentNodule.risk}`}>{getCandidateLikelihood(currentNodule, nodules).toFixed(0)}%</span>
                   </div>
 
                   <div className="details-content">
@@ -853,35 +1017,66 @@ export default function Review(){
                       <div className="detail-row">
                         <label>Location</label>
                         <select value={currentNodule.location} onChange={(e) => updateNodule(selectedNodule, 'location', e.target.value)}>
+                          <option value="AI">Model Candidate</option>
                           <option value="RUL">RUL</option><option value="RML">RML</option><option value="RLL">RLL</option>
                           <option value="LUL">LUL</option><option value="LLL">LLL</option>
                         </select>
                       </div>
                       <div className="detail-row">
-                        <label>Size (mm)</label>
+                        <label>Mask Width (px)</label>
                         <input type="number" value={currentNodule.size} onChange={(e) => updateNodule(selectedNodule, 'size', e.target.value)} step="0.1" />
                       </div>
                     </div>
 
                     <div className="detail-section">
-                      <label>AI Malignancy</label>
+                      <label>Nodule Likelihood</label>
                       <div className="probability-display">
-                        <div className="probability-bar"><div className={`probability-fill ${currentNodule.risk}`} style={{ width: `${currentNodule.probability * 100}%` }} /></div>
-                        <span>{(currentNodule.probability * 100).toFixed(0)}%</span>
+                        <div className="probability-bar"><div className={`probability-fill ${currentNodule.risk}`} style={{ width: `${getCandidateLikelihood(currentNodule, nodules)}%` }} /></div>
+                        <span>{getCandidateLikelihood(currentNodule, nodules).toFixed(0)}%</span>
                       </div>
+                      {currentNodule.coordinates?.classificationProbability && (
+                        <div className="classification-result">
+                          <strong>{getClassificationLabel(currentNodule)}</strong>
+                          <span>Classifier probability: {Number(currentNodule.coordinates.classificationProbability).toFixed(3)}</span>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="detail-section xai-section">
-                      <label>XAI Explanation</label>
-                      <div className="xai-features">
-                        {currentNodule.xaiExplanations?.map((exp, i) => (
-                          <div key={i} className="xai-feature">
-                            <span>{exp.feature}</span>
-                            <div className="confidence-bar"><div style={{ width: `${exp.confidence * 100}%` }} /><span>{(exp.confidence * 100).toFixed(0)}%</span></div>
-                          </div>
-                        ))}
+                    {(currentNodule.coordinates?.classifierPanelsUrl || currentNodule.coordinates?.classifierGradcamUrl) && (
+                      <div className="detail-section classifier-explanation-section">
+                        <label>Classifier Explanation</label>
+                        {currentNodule.coordinates?.classifierPanelsUrl ? (
+                          <img
+                            className="classifier-panels-image"
+                            src={toBackendAssetUrl(currentNodule.coordinates.classifierPanelsUrl)}
+                            alt="Classifier explanation panels"
+                          />
+                        ) : (
+                          <img
+                            className="classifier-crop-image"
+                            src={toBackendAssetUrl(currentNodule.coordinates.classifierGradcamUrl)}
+                            alt="Classifier explanation crop"
+                          />
+                        )}
+                        <p className="research-note">
+                          Model output is for research/demo purposes only and must not be used as a clinical diagnosis.
+                        </p>
                       </div>
-                    </div>
+                    )}
+
+                    {currentNodule.xaiExplanations?.length > 0 && (
+                      <div className="detail-section xai-section">
+                        <label>XAI Explanation</label>
+                        <div className="xai-features">
+                          {currentNodule.xaiExplanations.map((exp, i) => (
+                            <div key={i} className="xai-feature">
+                              <span>{exp.feature}</span>
+                              <div className="confidence-bar"><div style={{ width: `${exp.confidence * 100}%` }} /><span>{(exp.confidence * 100).toFixed(0)}%</span></div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="detail-section assessment-section">
                       <label>Assessment</label>
@@ -929,15 +1124,15 @@ export default function Review(){
                 <h4>Report Summary</h4>
                 <div className="summary-row"><span>Patient:</span><span>{study.patientName}</span></div>
                 <div className="summary-row"><span>Study Date:</span><span>{study.studyDate}</span></div>
-                <div className="summary-row"><span>Total Nodules:</span><span>{nodules.length}</span></div>
+                <div className="summary-row"><span>AI Candidates:</span><span>{nodules.length}</span></div>
                 <div className="summary-row"><span>Included:</span><span>{nodules.filter(n => n.includeInReport).length}</span></div>
                 <div className="summary-row"><span>Reviewed:</span><span>{nodules.filter(n => n.reviewed).length}/{nodules.length}</span></div>
               </div>
               <div className="nodules-preview">
-                <h4>Nodules to Include</h4>
+                <h4>AI Candidates to Include</h4>
                 {nodules.filter(n => n.includeInReport).map(nodule => (
                   <div key={nodule.id} className="nodule-preview-item">
-                    <span>#{nodule.id} - {nodule.location}</span><span>{nodule.size}mm</span>
+                    <span>#{nodule.displayRank || nodule.id} - {nodule.location}</span><span>{getCandidateLikelihood(nodule, nodules).toFixed(0)}%</span>
                     <span className={`risk-tag ${nodule.risk}`}>{nodule.risk}</span>
                     {nodule.doctorAssessment && <span className={`assessment-tag ${nodule.doctorAssessment}`}>{nodule.doctorAssessment}</span>}
                   </div>

@@ -254,26 +254,37 @@ function NewStudy() {
         console.log('DICOM files uploaded successfully');
       } else {
         console.log('No DICOM files to upload');
+        alert('No DICOM files selected. Please upload DICOM files before starting analysis.');
+        setIsProcessing(false);
+        return;
       }
       setProgress(40);
 
-      // Simulate AI analysis
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setProgress(70);
+      // Call real AI analysis endpoint
+      console.log('Starting AI analysis...');
+      const analysisResponse = await fetch(`http://localhost:3001/api/analyze-dicom/${newStudyId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ top_k: 3 })
+      });
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setProgress(90);
+      if (!analysisResponse.ok) {
+        const errorData = await analysisResponse.json();
+        throw new Error(errorData.error || 'AI analysis failed');
+      }
 
-      // Update study status
-      const noduleCount = Math.floor(Math.random() * 5) + 1; // Mock nodule count
-      await studyAPI.updateStatus(newStudyId, 'completed', noduleCount);
+      const analysisResult = await analysisResponse.json();
+      console.log('Analysis completed:', analysisResult);
       
       setProgress(100);
     } catch (error) {
       console.error('Error during analysis:', error);
-      alert('Failed to process study. Please try again.');
+      alert(`Failed to process study: ${error.message}`);
       setIsProcessing(false);
       setProgress(0);
+      return;
     }
   };
 

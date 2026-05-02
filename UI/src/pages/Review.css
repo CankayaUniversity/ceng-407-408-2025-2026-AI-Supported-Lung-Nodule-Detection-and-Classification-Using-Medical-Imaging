@@ -439,6 +439,15 @@
   justify-content: center;
 }
 
+.viewer-wrapper.heat-active::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.08);
+  z-index: 3;
+}
+
 .dicom-viewer {
   width: 100%;
   height: 100%;
@@ -474,6 +483,24 @@
   to { transform: rotate(360deg); }
 }
 
+.segmentation-overlay-image,
+.heatmap-overlay-image {
+  position: absolute;
+  pointer-events: none;
+  object-fit: fill;
+  z-index: 4;
+}
+
+.segmentation-overlay-image {
+  opacity: 0.96;
+  mix-blend-mode: normal;
+}
+
+.heatmap-overlay-image {
+  opacity: 0.72;
+  mix-blend-mode: normal;
+}
+
 /* Nodule Markers */
 .nodule-marker {
   position: absolute;
@@ -505,25 +532,12 @@
   color: white;
 }
 
-/* Heatmap */
-.heatmap-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.4;
-}
-
-.heatmap-gradient {
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(circle at 50% 45%, rgba(255, 0, 0, 0.6) 0%, rgba(255, 255, 0, 0.4) 25%, rgba(0, 255, 0, 0.2) 50%, transparent 75%);
-}
-
 /* Viewer Overlay */
 .viewer-overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 6;
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.7);
   font-family: monospace;
@@ -683,8 +697,17 @@
 .nodule-item-info {
   display: flex;
   justify-content: space-between;
+  gap: 0.75rem;
   font-size: 0.8rem;
   color: #8b949e;
+}
+
+.nodule-item-info span:first-child {
+  min-width: 0;
+}
+
+.nodule-item-info span:last-child {
+  flex-shrink: 0;
 }
 
 .review-status {
@@ -799,6 +822,52 @@
 .probability-fill.high { background: #ef4444; }
 .probability-fill.medium { background: #f59e0b; }
 .probability-fill.low { background: #10b981; }
+
+.classification-result {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: #e5e7eb;
+  font-size: 0.82rem;
+}
+
+.classification-result span {
+  color: #9ca3af;
+}
+
+.classifier-explanation-section {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  border-radius: 8px;
+  padding: 0.75rem !important;
+}
+
+.classifier-panels-image,
+.classifier-crop-image {
+  width: 100%;
+  display: block;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  background: #000;
+}
+
+.classifier-panels-image {
+  max-height: 260px;
+  object-fit: contain;
+}
+
+.classifier-crop-image {
+  max-height: 180px;
+  object-fit: contain;
+}
+
+.research-note {
+  margin: 0.6rem 0 0;
+  color: #9ca3af;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
 
 /* XAI Section */
 .xai-section {
