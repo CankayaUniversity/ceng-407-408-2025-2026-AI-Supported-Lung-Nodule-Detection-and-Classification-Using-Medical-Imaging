@@ -9,6 +9,7 @@ import logging
 import numpy as np
 import torch
 import cv2
+import math
 from typing import List, Dict, Optional
 import json
 from pathlib import Path
@@ -21,7 +22,8 @@ logger = logging.getLogger(__name__)
 # Import local modules
 from dicom_utils import (
     load_dicom_series, sort_dicom_slices, dicom_series_to_volume,
-    normalize_hu, create_5slice_stack, sliding_window_positions, crop_volume_window
+    normalize_hu, create_5slice_stack, sliding_window_positions, crop_volume_window,
+    get_pixel_spacing
 )
 from model_inference import load_segmentation_model, run_inference, run_batch_inference, extract_candidates
 from overlay_utils import create_overlay_image, create_mask_image, create_transparent_segmentation_overlay
@@ -787,6 +789,12 @@ def analyze_dicom_study(study_dir: str,
                 'Positive nodule candidate' if classifier_probability >= 0.5 else 'Negative / likely false positive'
             )
             risk = 'high' if nodule_probability >= 0.7 else 'medium' if nodule_probability >= 0.5 else 'low'
+            row_spacing_mm, col_spacing_mm = get_pixel_spacing(dicom_files[slice_idx])
+            width_mm = float(bbox['width']) * col_spacing_mm if bbox else None
+            height_mm = float(bbox['height']) * row_spacing_mm if bbox else None
+            pixel_area_mm2 = row_spacing_mm * col_spacing_mm
+            mask_area_mm2 = float(candidate['mask_area']) * pixel_area_mm2
+            equivalent_diameter_mm = math.sqrt((4.0 * mask_area_mm2) / math.pi) if mask_area_mm2 > 0 else None
             formatted = {
                 'id': idx + 1,
                 'nodule_number': idx + 1,
@@ -794,7 +802,8 @@ def analyze_dicom_study(study_dir: str,
                 'sliceNumber': display_slice_idx + 1,
                 'modelSliceIndex': slice_idx,
                 'location': 'AI',
-                'size': f"{bbox['width']:.1f}" if bbox else "N/A",
+                'size': f"{equivalent_diameter_mm:.1f}" if equivalent_diameter_mm is not None else "N/A",
+                'sizePx': f"{bbox['width']:.1f}" if bbox else "N/A",
                 'probability': f"{nodule_probability:.3f}",
                 'confidence': f"{nodule_probability:.3f}",
                 'score': f"{candidate['temporal_score']:.3f}",
@@ -827,7 +836,13 @@ def analyze_dicom_study(study_dir: str,
                     'x': coord_x,
                     'y': coord_y,
                     'pixelX': bbox['center_x'] if bbox else 0,
-                    'pixelY': bbox['center_y'] if bbox else 0
+                    'pixelY': bbox['center_y'] if bbox else 0,
+                    'pixelSpacingRowMm': row_spacing_mm,
+                    'pixelSpacingColMm': col_spacing_mm,
+                    'maskWidthMm': width_mm,
+                    'maskHeightMm': height_mm,
+                    'maskAreaMm2': mask_area_mm2,
+                    'equivalentDiameterMm': equivalent_diameter_mm
                 }
             }
             results['candidates'].append(formatted)

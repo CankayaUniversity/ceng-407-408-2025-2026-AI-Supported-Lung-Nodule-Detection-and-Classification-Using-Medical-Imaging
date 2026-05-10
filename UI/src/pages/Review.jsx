@@ -875,9 +875,9 @@ export default function Review(){
                     </div>
                     {nodules.length > 0 && (
                       <div className="ai-stat-row">
-                        <span className="ai-stat-label">Largest Mask</span>
+                        <span className="ai-stat-label">Largest Eq. Diameter</span>
                         <span className="ai-stat-value">
-                          {Math.max(...nodules.map(n => parseFloat(n.size))).toFixed(1)} px ({nodules.reduce((max, n) => parseFloat(n.size) > parseFloat(max.size) ? n : max, nodules[0]).location})
+                          {Math.max(...nodules.map(n => parseFloat(n.size))).toFixed(1)} mm ({nodules.reduce((max, n) => parseFloat(n.size) > parseFloat(max.size) ? n : max, nodules[0]).location})
                         </span>
                       </div>
                     )}
@@ -998,7 +998,7 @@ export default function Review(){
                       <span className={`risk-badge ${nodule.risk}`}>{getCandidateLikelihood(nodule, nodules).toFixed(0)}%</span>
                     </div>
                     <div className="nodule-item-info">
-                      <span>Slice {nodule.sliceIndex + 1} - {nodule.size}px mask</span>
+                      <span>Slice {nodule.sliceIndex + 1} - {nodule.size} mm eq. dia.</span>
                       <span>{getCandidateLikelihood(nodule, nodules).toFixed(0)}% likelihood</span>
                     </div>
                   </div>
@@ -1023,7 +1023,7 @@ export default function Review(){
                         </select>
                       </div>
                       <div className="detail-row">
-                        <label>Mask Width (px)</label>
+                        <label>Equivalent Diameter (mm)</label>
                         <input type="number" value={currentNodule.size} onChange={(e) => updateNodule(selectedNodule, 'size', e.target.value)} step="0.1" />
                       </div>
                     </div>

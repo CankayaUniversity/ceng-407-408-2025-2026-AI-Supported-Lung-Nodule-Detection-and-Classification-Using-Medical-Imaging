@@ -12,6 +12,27 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def get_pixel_spacing(ds: pydicom.Dataset) -> Tuple[float, float]:
+    """
+    Read in-plane pixel spacing from a DICOM slice.
+
+    Returns:
+        Tuple of (row_spacing_mm, col_spacing_mm). Falls back to (1.0, 1.0)
+        if the metadata is unavailable or invalid.
+    """
+    pixel_spacing = getattr(ds, 'PixelSpacing', None)
+    if pixel_spacing is None or len(pixel_spacing) < 2:
+        return 1.0, 1.0
+
+    try:
+        row_spacing = float(pixel_spacing[0])
+        col_spacing = float(pixel_spacing[1])
+        return row_spacing, col_spacing
+    except (TypeError, ValueError):
+        logger.warning("Invalid PixelSpacing encountered; falling back to 1.0 mm")
+        return 1.0, 1.0
+
+
 def load_dicom_series(series_dir: str) -> Tuple[List[pydicom.Dataset], List[str]]:
     """
     Load all DICOM files from a directory.
