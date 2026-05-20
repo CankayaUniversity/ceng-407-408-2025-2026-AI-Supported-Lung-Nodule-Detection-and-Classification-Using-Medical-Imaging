@@ -55,6 +55,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const PYTHON_EXECUTABLE = process.env.PYTHON_EXECUTABLE || 'python';
 
 // Middleware
 app.use(cors({
@@ -64,6 +65,48 @@ app.use(cors({
   exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length']
 }));
 app.use(express.json());
+
+const runPythonJsonScript = (scriptName, payload) => new Promise((resolve, reject) => {
+  const pythonProcess = spawn(PYTHON_EXECUTABLE, [scriptName], {
+    cwd: __dirname,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1'
+    }
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  pythonProcess.stdout.on('data', (data) => {
+    stdout += data.toString('utf8');
+  });
+
+  pythonProcess.stderr.on('data', (data) => {
+    stderr += data.toString('utf8');
+  });
+
+  pythonProcess.on('error', (error) => {
+    reject(error);
+  });
+
+  pythonProcess.on('close', (code) => {
+    if (code !== 0) {
+      reject(new Error(stderr || `Python process exited with code ${code}`));
+      return;
+    }
+
+    try {
+      resolve(JSON.parse(stdout));
+    } catch (error) {
+      reject(new Error(`Failed to parse Python JSON output: ${error.message}`));
+    }
+  });
+
+  pythonProcess.stdin.end(Buffer.from(JSON.stringify(payload || {}), 'utf8'));
+});
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -340,6 +383,16 @@ const SEGMENTATION_MODELS = {
   }
 };
 
+app.post('/api/nlp/analyze-note', async (req, res) => {
+  try {
+    const analysis = await runPythonJsonScript('nlp_analysis.py', req.body || {});
+    res.json({ success: true, analysis });
+  } catch (error) {
+    console.error('Error running NLP analysis:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ============ AI ANALYSIS ROUTE ============
 app.post('/api/analyze-dicom/:studyId', async (req, res) => {
   const studyId = req.params.studyId;
@@ -389,9 +442,9 @@ app.post('/api/analyze-dicom/:studyId', async (req, res) => {
     }
     
     // Run Python analysis asynchronously
-    console.log(`Running analysis with: python run_analysis.py "${studyDir}" "${modelPath}" "${overlaysDir}" ${topK}`);
+    console.log(`Running analysis with: ${PYTHON_EXECUTABLE} run_analysis.py "${studyDir}" "${modelPath}" "${overlaysDir}" ${topK}`);
     
-    const pythonProcess = spawn('python', [
+    const pythonProcess = spawn(PYTHON_EXECUTABLE, [
       'run_analysis.py',
       studyDir,
       modelPath,

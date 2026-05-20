@@ -248,6 +248,107 @@ def candidate_probability_map(candidate: Dict, height: int, width: int) -> np.nd
     return full_probs
 
 
+def estimate_lung_slice_bounds(volume_norm: np.ndarray) -> tuple:
+    """Estimate the inclusive slice range where lungs are substantially visible."""
+    if volume_norm.ndim != 3 or volume_norm.shape[0] == 0:
+        return 0, 0
+
+    slice_scores = []
+    kernel = np.ones((7, 7), np.uint8)
+    for slice_norm in volume_norm:
+        body_mask = (slice_norm > 0.05).astype(np.uint8)
+        if int(body_mask.sum()) == 0:
+            slice_scores.append(0)
+            continue
+
+        body_mask = cv2.morphologyEx(body_mask, cv2.MORPH_CLOSE, kernel)
+        lung_like = ((slice_norm > 0.05) & (slice_norm < 0.52) & (body_mask > 0)).astype(np.uint8)
+        lung_like = cv2.morphologyEx(lung_like, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        slice_scores.append(int(lung_like.sum()))
+
+    max_score = max(slice_scores, default=0)
+    if max_score <= 0:
+        return 0, max(0, volume_norm.shape[0] - 1)
+
+    threshold = max(int(max_score * 0.18), int(volume_norm.shape[1] * volume_norm.shape[2] * 0.015))
+    valid_indices = [index for index, score in enumerate(slice_scores) if score >= threshold]
+    if not valid_indices:
+        return 0, max(0, volume_norm.shape[0] - 1)
+
+    return valid_indices[0], valid_indices[-1]
+
+
+def patient_x_at_pixel(ds, pixel_x: float, pixel_y: float) -> Optional[float]:
+    """Map image pixel coordinates to DICOM patient X coordinate when possible."""
+    orientation = getattr(ds, 'ImageOrientationPatient', None)
+    position = getattr(ds, 'ImagePositionPatient', None)
+    if orientation is None or position is None or len(orientation) < 6 or len(position) < 3:
+        return None
+
+    try:
+        row_spacing_mm, col_spacing_mm = get_pixel_spacing(ds)
+        row_cosines = np.asarray(orientation[:3], dtype=np.float32)
+        col_cosines = np.asarray(orientation[3:6], dtype=np.float32)
+        origin = np.asarray(position[:3], dtype=np.float32)
+        patient_point = origin + row_cosines * (col_spacing_mm * float(pixel_x)) + col_cosines * (row_spacing_mm * float(pixel_y))
+        return float(patient_point[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def estimate_candidate_location(candidate: Dict,
+                                dicom_slice,
+                                slice_idx: int,
+                                num_slices: int,
+                                lung_slice_start: int,
+                                lung_slice_end: int,
+                                image_width: int) -> Dict:
+    """Estimate coarse left/right + upper/middle/lower lobe location."""
+    bbox = candidate.get('bbox') or {}
+    center_x = float(bbox.get('center_x', image_width / 2.0))
+    center_y = float(bbox.get('center_y', 0.0))
+
+    patient_x = patient_x_at_pixel(dicom_slice, center_x, center_y)
+    center_patient_x = patient_x_at_pixel(dicom_slice, image_width / 2.0, center_y)
+    if patient_x is not None and center_patient_x is not None:
+        side = 'L' if patient_x > center_patient_x else 'R'
+        side_confidence = 'high'
+    else:
+        side = 'L' if center_x >= image_width / 2.0 else 'R'
+        side_confidence = 'medium'
+
+    lung_start = max(0, min(lung_slice_start, num_slices - 1))
+    lung_end = max(lung_start, min(lung_slice_end, num_slices - 1))
+    if lung_end == lung_start:
+        slice_fraction = float(slice_idx) / float(max(1, num_slices - 1))
+        vertical_confidence = 'low'
+    else:
+        slice_fraction = (float(slice_idx) - float(lung_start)) / float(max(1, lung_end - lung_start))
+        vertical_confidence = 'medium'
+    slice_fraction = float(np.clip(slice_fraction, 0.0, 1.0))
+
+    if side == 'R':
+        if slice_fraction < 0.33:
+            code = 'RUL'
+        elif slice_fraction < 0.66:
+            code = 'RML'
+        else:
+            code = 'RLL'
+    else:
+        code = 'LUL' if slice_fraction < 0.50 else 'LLL'
+
+    confidence = 'high' if side_confidence == 'high' and vertical_confidence == 'medium' else 'medium' if side_confidence != 'low' else 'low'
+    return {
+        'code': code,
+        'sliceFraction': slice_fraction,
+        'lungSliceStart': lung_start,
+        'lungSliceEnd': lung_end,
+        'confidence': confidence,
+        'sideConfidence': side_confidence,
+        'patientX': patient_x,
+    }
+
+
 def bbox_iou(box_a: Dict, box_b: Dict) -> float:
     """Compute IoU for two bounding boxes with xy min/max keys."""
     if not box_a or not box_b:
@@ -571,6 +672,8 @@ def analyze_dicom_study(study_dir: str,
         logger.info("Normalizing HU values...")
         volume_norm = normalize_hu(volume, hu_min=-1000, hu_max=400)
         logger.info(f"Normalized volume range: [{volume_norm.min():.3f}, {volume_norm.max():.3f}]")
+        lung_slice_start, lung_slice_end = estimate_lung_slice_bounds(volume_norm)
+        logger.info(f"Estimated lung slice range: {lung_slice_start} - {lung_slice_end}")
         
         # Step 4: Load segmentation model
         logger.info(f"Loading segmentation model from {model_path}...")
@@ -795,13 +898,22 @@ def analyze_dicom_study(study_dir: str,
             pixel_area_mm2 = row_spacing_mm * col_spacing_mm
             mask_area_mm2 = float(candidate['mask_area']) * pixel_area_mm2
             equivalent_diameter_mm = math.sqrt((4.0 * mask_area_mm2) / math.pi) if mask_area_mm2 > 0 else None
+            location_estimate = estimate_candidate_location(
+                candidate,
+                dicom_files[slice_idx],
+                slice_idx=slice_idx,
+                num_slices=D,
+                lung_slice_start=lung_slice_start,
+                lung_slice_end=lung_slice_end,
+                image_width=W,
+            )
             formatted = {
                 'id': idx + 1,
                 'nodule_number': idx + 1,
                 'sliceIndex': display_slice_idx,
                 'sliceNumber': display_slice_idx + 1,
                 'modelSliceIndex': slice_idx,
-                'location': 'AI',
+                'location': location_estimate['code'],
                 'size': f"{equivalent_diameter_mm:.1f}" if equivalent_diameter_mm is not None else "N/A",
                 'sizePx': f"{bbox['width']:.1f}" if bbox else "N/A",
                 'probability': f"{nodule_probability:.3f}",
@@ -842,7 +954,12 @@ def analyze_dicom_study(study_dir: str,
                     'maskWidthMm': width_mm,
                     'maskHeightMm': height_mm,
                     'maskAreaMm2': mask_area_mm2,
-                    'equivalentDiameterMm': equivalent_diameter_mm
+                    'equivalentDiameterMm': equivalent_diameter_mm,
+                    'locationConfidence': location_estimate['confidence'],
+                    'locationSliceFraction': location_estimate['sliceFraction'],
+                    'lungSliceStart': location_estimate['lungSliceStart'],
+                    'lungSliceEnd': location_estimate['lungSliceEnd'],
+                    'patientX': location_estimate['patientX']
                 }
             }
             results['candidates'].append(formatted)

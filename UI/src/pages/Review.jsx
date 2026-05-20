@@ -40,6 +40,26 @@ const getClassificationLabel = (candidate) => {
     : 'Negative / likely false positive';
 };
 
+const getValidSliceIndex = (nodule, dicomFileCount = Number.POSITIVE_INFINITY) => {
+  const candidates = [
+    nodule?.sliceIndex,
+    nodule?.slice_index,
+    nodule?.coordinates?.sliceIndex,
+    nodule?.coordinates?.displaySliceIndex,
+    Number.isFinite(Number(nodule?.coordinates?.sliceNumber)) ? Number(nodule.coordinates.sliceNumber) - 1 : null,
+    nodule?.coordinates?.modelSliceIndex,
+  ];
+
+  for (const candidate of candidates) {
+    const numeric = Number(candidate);
+    if (Number.isInteger(numeric) && numeric >= 0 && numeric < dicomFileCount) {
+      return numeric;
+    }
+  }
+
+  return 0;
+};
+
 export default function Review(){
   const { studyId } = useParams();
   const navigate = useNavigate();
@@ -65,30 +85,36 @@ export default function Review(){
   
   // Callback ref to initialize cornerstone when element is mounted
   const setViewerRef = useCallback((element) => {
-    if (element && !viewerRef.current) {
-      viewerRef.current = element;
-      console.log('Viewer element mounted, initializing cornerstone...');
-      
-      // Initialize cornerstone on this element
-      try {
-        cornerstone.enable(element);
-        setViewerReady(true);
-        console.log('Cornerstone enabled successfully');
-        
-        // Load first image if dicomFiles are available
-        if (dicomFilesRef.current.length > 0) {
-          const file = dicomFilesRef.current[0];
-          const imageId = `wadouri:http://localhost:3001${file.file_path}`;
-          cornerstone.loadAndCacheImage(imageId).then(image => {
-            cornerstone.displayImage(element, image);
-            cornerstone.resize(element, true);
-            enableImageTools(element);
-            console.log('First image displayed');
-          }).catch(err => console.error('Error loading first image:', err));
-        }
-      } catch (e) {
-        console.error('Error enabling cornerstone:', e);
+    if (!element) {
+      viewerRef.current = null;
+      setViewerReady(false);
+      return;
+    }
+
+    if (viewerRef.current === element) {
+      return;
+    }
+
+    viewerRef.current = element;
+    console.log('Viewer element mounted, initializing cornerstone...');
+
+    try {
+      cornerstone.enable(element);
+      setViewerReady(true);
+      console.log('Cornerstone enabled successfully');
+
+      if (dicomFilesRef.current.length > 0) {
+        const file = dicomFilesRef.current[0];
+        const imageId = `wadouri:http://localhost:3001${file.file_path}`;
+        cornerstone.loadAndCacheImage(imageId).then(image => {
+          cornerstone.displayImage(element, image);
+          cornerstone.resize(element, true);
+          enableImageTools(element);
+          console.log('First image displayed');
+        }).catch(err => console.error('Error loading first image:', err));
       }
+    } catch (e) {
+      console.error('Error enabling cornerstone:', e);
     }
   }, []);
   const [windowLevel, setWindowLevel] = useState(WINDOW_PRESETS.lung);
@@ -167,7 +193,7 @@ export default function Review(){
 
       const nextPositions = {};
       nodules.forEach((nodule, index) => {
-        if (nodule.sliceIndex !== currentImageIndex) return;
+        if (getValidSliceIndex(nodule, dicomFiles.length) !== currentImageIndex) return;
 
         const imagePoint = getNoduleImagePoint(nodule, image);
         if (!imagePoint) return;
@@ -182,13 +208,13 @@ export default function Review(){
       setMarkerPositions(nextPositions);
 
       const overlayNodule =
-        (nodules[selectedNodule]?.sliceIndex === currentImageIndex && nodules[selectedNodule]?.coordinates?.overlayUrl
+        (getValidSliceIndex(nodules[selectedNodule], dicomFiles.length) === currentImageIndex && nodules[selectedNodule]?.coordinates?.overlayUrl
           ? nodules[selectedNodule]
-          : nodules.find(nodule => nodule.sliceIndex === currentImageIndex && nodule.coordinates?.overlayUrl));
+          : nodules.find(nodule => getValidSliceIndex(nodule, dicomFiles.length) === currentImageIndex && nodule.coordinates?.overlayUrl));
       const heatmapNodule =
-        (nodules[selectedNodule]?.sliceIndex === currentImageIndex && nodules[selectedNodule]?.coordinates?.heatmapUrl
+        (getValidSliceIndex(nodules[selectedNodule], dicomFiles.length) === currentImageIndex && nodules[selectedNodule]?.coordinates?.heatmapUrl
           ? nodules[selectedNodule]
-          : nodules.find(nodule => nodule.sliceIndex === currentImageIndex && nodule.coordinates?.heatmapUrl));
+          : nodules.find(nodule => getValidSliceIndex(nodule, dicomFiles.length) === currentImageIndex && nodule.coordinates?.heatmapUrl));
 
       const imageStyle = () => {
         const topLeft = cornerstone.pixelToCanvas(element, { x: 0, y: 0 });
@@ -339,6 +365,8 @@ export default function Review(){
   useEffect(() => {
     viewerInitialized.current = false;
     initialNoduleSliceDone.current = false;
+    setViewerReady(false);
+    setCurrentImageIndex(0);
   }, [studyId]);
 
   // Initialize cornerstone when dicomFiles are loaded
@@ -477,6 +505,7 @@ export default function Review(){
       
       if (response.ok) {
         const studyData = await response.json();
+        let sortedFiles = [];
         
         setStudy({
           id: studyData.study_id,
@@ -495,13 +524,14 @@ export default function Review(){
         
         if (studyData.dicomFiles && studyData.dicomFiles.length > 0) {
           console.log('DICOM files found:', studyData.dicomFiles.length);
-          const sortedFiles = studyData.dicomFiles.sort((a, b) => 
+          sortedFiles = [...studyData.dicomFiles].sort((a, b) => 
             a.file_name.localeCompare(b.file_name, undefined, { numeric: true })
           );
           setDicomFiles(sortedFiles);
           console.log('First DICOM file:', sortedFiles[0]);
         } else {
           console.log('No DICOM files found for this study');
+          setDicomFiles([]);
         }
 
         // Fetch real nodules from database (from AI analysis)
@@ -520,7 +550,7 @@ export default function Review(){
             size: (nodule.size_mm || 0).toFixed(1),
             probability: (nodule.probability || 0).toFixed(2),
             risk: risk,
-            sliceIndex: nodule.slice_index || 0,
+            sliceIndex: getValidSliceIndex(nodule, sortedFiles.length || Number.POSITIVE_INFINITY),
             reviewed: nodule.reviewed || false,
             includeInReport: nodule.include_in_report !== false,
             notes: nodule.notes || '',
@@ -535,10 +565,13 @@ export default function Review(){
           }));
         
         setNodules(formattedNodules);
+        if (formattedNodules.length === 0) {
+          setSelectedNodule(0);
+        }
         if (!initialNoduleSliceDone.current && formattedNodules.length > 0) {
           initialNoduleSliceDone.current = true;
           setSelectedNodule(0);
-          const firstSlice = Number(formattedNodules[0].sliceIndex);
+          const firstSlice = getValidSliceIndex(formattedNodules[0], sortedFiles.length);
           if (Number.isInteger(firstSlice) && firstSlice >= 0 && firstSlice < sortedFiles.length) {
             setCurrentImageIndex(firstSlice);
           }
@@ -666,11 +699,16 @@ export default function Review(){
   };
 
   const goToNoduleSlice = (nodule, index) => {
-    if (nodule.sliceIndex !== undefined && nodule.sliceIndex < dicomFiles.length) {
-      setCurrentImageIndex(nodule.sliceIndex);
-    }
+    const targetSliceIndex = getValidSliceIndex(nodule, dicomFiles.length);
+    setCurrentImageIndex(targetSliceIndex);
     setSelectedNodule(index);
     updateNodule(index, 'reviewed', true);
+
+    if (viewerRef.current && dicomFiles[targetSliceIndex]) {
+      loadDicomImage(targetSliceIndex);
+    } else {
+      scheduleOverlayUpdate();
+    }
   };
 
   const updateNodule = async (index, field, value) => {
@@ -728,6 +766,35 @@ export default function Review(){
     setReportGenerating(true);
     
     try {
+      let nlpAnalysis = null;
+      try {
+        const nlpResponse = await fetch(`${API_URL}/nlp/analyze-note`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            study_id: studyId,
+            patient_age: study.age,
+            patient_gender: study.gender,
+            clinical_note: study.clinicalInfo || '',
+            description: study.description || '',
+            nodules: nodules.map((nodule) => ({
+              id: nodule.id,
+              risk: nodule.risk,
+              notes: nodule.notes,
+              doctorAssessment: nodule.doctorAssessment,
+              includeInReport: nodule.includeInReport,
+            })),
+          })
+        });
+
+        if (nlpResponse.ok) {
+          const nlpResult = await nlpResponse.json();
+          nlpAnalysis = nlpResult.analysis || null;
+        }
+      } catch (nlpError) {
+        console.error('Error running report NLP analysis:', nlpError);
+      }
+
       const reportData = {
         study_id: studyId,
         patient_id: study.patientID,
@@ -739,6 +806,7 @@ export default function Review(){
           study: study,
           nodules: nodules.filter(n => n.includeInReport),
           allNodules: nodules,
+          nlpAnalysis,
           generatedAt: new Date().toISOString()
         },
         generated_by: localStorage.getItem('userFirstName') + ' ' + localStorage.getItem('userLastName'),
@@ -998,7 +1066,7 @@ export default function Review(){
                       <span className={`risk-badge ${nodule.risk}`}>{getCandidateLikelihood(nodule, nodules).toFixed(0)}%</span>
                     </div>
                     <div className="nodule-item-info">
-                      <span>Slice {nodule.sliceIndex + 1} - {nodule.size} mm eq. dia.</span>
+                      <span>Slice {getValidSliceIndex(nodule, dicomFiles.length) + 1} - {nodule.size} mm eq. dia.</span>
                       <span>{getCandidateLikelihood(nodule, nodules).toFixed(0)}% likelihood</span>
                     </div>
                   </div>
