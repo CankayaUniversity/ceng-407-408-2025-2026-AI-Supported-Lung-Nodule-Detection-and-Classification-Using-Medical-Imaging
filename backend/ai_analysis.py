@@ -886,12 +886,19 @@ def analyze_dicom_study(study_dir: str,
             segmentation_probability = float(candidate['mean_probability'])
             classifier_probability = float(classifier_result.get('probability', 0.0))
             nodule_probability = segmentation_probability
+            average_risk = (segmentation_probability + classifier_probability) / 2.0
             predicted_class = int(classifier_result.get('predicted_class', int(classifier_probability >= 0.5)))
             classification_label = classifier_result.get(
                 'label',
                 'Positive nodule candidate' if classifier_probability >= 0.5 else 'Negative / likely false positive'
             )
-            risk = 'high' if nodule_probability >= 0.7 else 'medium' if nodule_probability >= 0.5 else 'low'
+            # Yeni risk algoritması: classifier < 0.4 ise düşük, ortalama >= 0.7 ise yüksek, aksi halde orta
+            if classifier_probability < 0.4:
+                risk = 'low'
+            elif average_risk >= 0.7:
+                risk = 'high'
+            else:
+                risk = 'medium'
             row_spacing_mm, col_spacing_mm = get_pixel_spacing(dicom_files[slice_idx])
             width_mm = float(bbox['width']) * col_spacing_mm if bbox else None
             height_mm = float(bbox['height']) * row_spacing_mm if bbox else None
