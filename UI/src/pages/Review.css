@@ -209,6 +209,13 @@
   color: #e5e7eb;
 }
 
+.panel-subtitle {
+  margin: 0.35rem 0 0 0;
+  font-size: 0.78rem;
+  color: #8b949e;
+  line-height: 1.35;
+}
+
 .panel-content {
   flex: 1;
   overflow-y: auto;
@@ -722,6 +729,19 @@
   padding: 2rem;
   text-align: center;
   color: #8b949e;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.no-nodules strong {
+  color: #e5e7eb;
+  font-size: 0.95rem;
+}
+
+.no-nodules span {
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 /* Nodule Details */
@@ -761,6 +781,32 @@
   flex: 1;
   padding: 1rem;
   overflow-y: auto;
+}
+
+.empty-details .details-content {
+  justify-content: flex-start;
+}
+
+.empty-state-card {
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  color: #c9d1d9;
+}
+
+.empty-state-card p {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.empty-state-card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #8b949e;
+  font-size: 0.82rem;
+  line-height: 1.5;
 }
 
 .detail-section {
@@ -1138,6 +1184,14 @@
   border-radius: 6px;
   margin-bottom: 0.5rem;
   font-size: 0.85rem;
+}
+
+.empty-report-state {
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #8b949e;
 }
 
 .risk-tag, .assessment-tag {

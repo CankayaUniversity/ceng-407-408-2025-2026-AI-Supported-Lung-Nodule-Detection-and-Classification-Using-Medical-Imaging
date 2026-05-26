@@ -29,6 +29,9 @@ from model_inference import load_segmentation_model, run_inference, run_batch_in
 from overlay_utils import create_overlay_image, create_mask_image, create_transparent_segmentation_overlay
 from classifier_inference import (
     load_student_classifier,
+    crop_3d_cube,
+    make_25d_classifier_input,
+    classify_candidate,
     integrate_segmentation_classification_gradcam,
 )
 
@@ -494,6 +497,22 @@ def _classifier_probability(candidate: Dict, classifier_results: Dict) -> float:
     return float(candidate.get('mean_probability', candidate.get('max_probability', 0.0)))
 
 
+def classify_candidate_for_ranking(classifier, volume_norm: np.ndarray, candidate: Dict, device: str) -> Optional[Dict]:
+    """Run the 2.5D classifier without Grad-CAM so candidate ranking can use classifier probability."""
+    bbox = candidate.get("bbox")
+    if not bbox:
+        return None
+
+    center = (
+        int(candidate["slice_index"]),
+        int(bbox["center_y"]),
+        int(bbox["center_x"]),
+    )
+    cube, _ = crop_3d_cube(volume_norm, center, size=32)
+    classifier_input = make_25d_classifier_input(cube)
+    return classify_candidate(classifier, classifier_input, device=device)
+
+
 def _same_nodule_across_neighbor_slices(candidate_a: Dict,
                                         candidate_b: Dict,
                                         max_slice_gap: int = 6) -> bool:
@@ -783,27 +802,10 @@ def analyze_dicom_study(study_dir: str,
             candidate['temporal_score'] = float(temporal_boost(candidate['candidate_score'], support))
 
         candidate_list.sort(key=lambda x: x['temporal_score'], reverse=True)
-        final_candidates = select_dominant_candidates(candidate_list, top_k=top_k)
+        fallback_candidates = select_dominant_candidates(candidate_list, top_k=top_k)
+        final_candidates = fallback_candidates
         
-        logger.info(f"Final candidate count: {len(final_candidates)}")
-        
-        # Step 7: Generate candidate-specific overlays (if output_dir specified)
-        overlay_paths = {}
-        if output_dir is not None:
-            os.makedirs(output_dir, exist_ok=True)
-            logger.info(f"Generating overlays in {output_dir}...")
-
-            for idx, candidate in enumerate(final_candidates):
-                slice_idx = candidate['slice_index']
-                ct_slice = dicom_files[slice_idx].pixel_array.astype(np.float32)
-                mask = candidate_full_mask(candidate, H, W)
-                if mask.sum() == 0:
-                    continue
-                probs = np.zeros((H, W), dtype=np.float32)
-                probs[mask > 0] = prediction_maps.get(slice_idx, np.zeros((H, W), dtype=np.float32))[mask > 0]
-                overlay_path = os.path.join(output_dir, f"candidate_{idx + 1:02d}_slice_{slice_idx:03d}.png")
-                create_transparent_segmentation_overlay(mask, bbox=candidate.get('bbox'), output_path=overlay_path)
-                overlay_paths[id(candidate)] = overlay_path
+        logger.info(f"Pre-classifier candidate count: {len(final_candidates)}")
 
         # Save top 50 debug overlays for inspection of candidate ranking.
         debug_overlay_paths = []
@@ -817,10 +819,76 @@ def analyze_dicom_study(study_dir: str,
             if overlay_path:
                 debug_overlay_paths.append(overlay_path)
 
-        # Step 8: Classify final segmentation candidates and generate classifier Grad-CAM.
+        # Step 8: Classify a wider segmentation pool, then generate Grad-CAM only for final candidates.
         classifier_results = {}
         if output_dir is not None:
-            logger.info("Running classifier and Grad-CAM for final candidates...")
+            classifier_pool_size = min(len(candidate_list), max(top_k * 15, 30))
+            classifier_pool = candidate_list[:classifier_pool_size]
+            logger.info(
+                "Running classifier ranking for top %d segmentation candidates before final selection...",
+                len(classifier_pool),
+            )
+
+            for idx, candidate in enumerate(classifier_pool):
+                if candidate.get('bbox') is None:
+                    continue
+                try:
+                    classifier_result = classify_candidate_for_ranking(
+                        classifier=classifier,
+                        volume_norm=volume_norm,
+                        candidate=candidate,
+                        device=device,
+                    )
+                    if classifier_result is None:
+                        continue
+                    classifier_results[id(candidate)] = classifier_result
+                    logger.info(
+                        "Rank pool candidate %d classifier probability %.4f (%s)",
+                        idx + 1,
+                        classifier_result['probability'],
+                        classifier_result['label'],
+                    )
+                except Exception as exc:
+                    logger.warning("Classifier ranking failed for candidate %d: %s", idx + 1, exc)
+
+            positive_candidates = [
+                candidate for candidate in classifier_pool
+                if float(classifier_results.get(id(candidate), {}).get('probability', 0.0)) >= 0.5
+            ]
+            if positive_candidates:
+                positive_candidates.sort(
+                    key=lambda item: (
+                        float(classifier_results.get(id(item), {}).get('probability', 0.0)),
+                        float(item.get('temporal_score', item.get('candidate_score', 0.0))),
+                        int(item.get('mask_area', 0)),
+                    ),
+                    reverse=True
+                )
+                final_candidates = positive_candidates
+            final_candidates = merge_neighboring_slice_candidates_by_classifier(
+                final_candidates,
+                classifier_results,
+                max_slice_gap=6,
+            )[:top_k]
+
+            logger.info(f"Final candidate count after classifier ranking: {len(final_candidates)}")
+
+        # Step 9: Generate candidate-specific overlays (if output_dir specified)
+        overlay_paths = {}
+        if output_dir is not None:
+            os.makedirs(output_dir, exist_ok=True)
+            logger.info(f"Generating overlays in {output_dir}...")
+
+            for idx, candidate in enumerate(final_candidates):
+                slice_idx = candidate['slice_index']
+                mask = candidate_full_mask(candidate, H, W)
+                if mask.sum() == 0:
+                    continue
+                overlay_path = os.path.join(output_dir, f"candidate_{idx + 1:02d}_slice_{slice_idx:03d}.png")
+                create_transparent_segmentation_overlay(mask, bbox=candidate.get('bbox'), output_path=overlay_path)
+                overlay_paths[id(candidate)] = overlay_path
+
+            logger.info("Generating classifier Grad-CAM explanations for final candidates...")
             classifier_dir = os.path.join(output_dir, "classifier_explanations")
             os.makedirs(classifier_dir, exist_ok=True)
             for idx, candidate in enumerate(final_candidates):
@@ -842,28 +910,13 @@ def analyze_dicom_study(study_dir: str,
                 )
                 classifier_results[id(candidate)] = classifier_result
                 logger.info(
-                    "Candidate %d classifier probability %.4f (%s)",
+                    "Final candidate %d classifier probability %.4f (%s)",
                     idx + 1,
                     classifier_result['probability'],
                     classifier_result['label'],
                 )
-            positive_candidates = [
-                candidate for candidate in final_candidates
-                if float(classifier_results.get(id(candidate), {}).get('probability', 0.0)) >= 0.5
-            ]
-            if positive_candidates:
-                positive_candidates.sort(
-                    key=lambda item: float(classifier_results.get(id(item), {}).get('probability', 0.0)),
-                    reverse=True
-                )
-                final_candidates = positive_candidates
-            final_candidates = merge_neighboring_slice_candidates_by_classifier(
-                final_candidates,
-                classifier_results,
-                max_slice_gap=6,
-            )
         
-        # Step 9: Prepare results
+        # Step 10: Prepare results
         results = {
             'success': True,
             'study_dir': study_dir,

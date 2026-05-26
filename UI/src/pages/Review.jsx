@@ -15,6 +15,9 @@ const WINDOW_PRESETS = {
 };
 
 const getCandidateSortScore = (candidate) => {
+  const classifierProbability = Number(candidate?.coordinates?.classificationProbability);
+  if (Number.isFinite(classifierProbability)) return classifierProbability;
+
   const modelScore = Number(candidate?.coordinates?.score);
   if (Number.isFinite(modelScore)) return modelScore;
 
@@ -22,9 +25,39 @@ const getCandidateSortScore = (candidate) => {
   return Number.isFinite(probability) ? probability : 0;
 };
 
-const getCandidateLikelihood = (candidate, candidates) => {
+const clampPercent = (value) => (
+  Number.isFinite(value) ? Math.max(0, Math.min(100, value * 100)) : 0
+);
+
+const getSegmentationProbability = (candidate) => {
+  const segmentationProbability = Number(candidate?.coordinates?.segmentationProbability);
+  if (Number.isFinite(segmentationProbability)) return segmentationProbability;
+
   const probability = Number(candidate?.probability);
-  return Number.isFinite(probability) ? Math.max(0, Math.min(100, probability * 100)) : 0;
+  return Number.isFinite(probability) ? probability : 0;
+};
+
+const getClassifierProbability = (candidate) => {
+  const classifierProbability = Number(candidate?.coordinates?.classificationProbability);
+  return Number.isFinite(classifierProbability) ? classifierProbability : null;
+};
+
+const getCandidateRisk = (candidate) => {
+  const classifierProbability = getClassifierProbability(candidate);
+  if (classifierProbability === null) return candidate?.risk || 'medium';
+
+  const segmentationProbability = getSegmentationProbability(candidate);
+  const averageRisk = (segmentationProbability + classifierProbability) / 2;
+  if (classifierProbability < 0.4) return 'low';
+  if (averageRisk >= 0.7) return 'high';
+  return 'medium';
+};
+
+const getCandidateLikelihood = (candidate) => {
+  const classifierProbability = getClassifierProbability(candidate);
+  if (classifierProbability !== null) return clampPercent(classifierProbability);
+
+  return clampPercent(getSegmentationProbability(candidate));
 };
 
 const toBackendAssetUrl = (url) => {
@@ -38,6 +71,12 @@ const getClassificationLabel = (candidate) => {
   return getCandidateLikelihood(candidate) >= 50
     ? 'Positive nodule candidate'
     : 'Negative / likely false positive';
+};
+
+const getCandidateHeaderText = (count) => {
+  if (count === 0) return 'No AI candidates';
+  if (count === 1) return '1 AI candidate';
+  return `${count} AI candidates`;
 };
 
 const getValidSliceIndex = (nodule, dicomFileCount = Number.POSITIVE_INFINITY) => {
@@ -541,6 +580,7 @@ export default function Review(){
         const formattedNodules = nodulesList.map((nodule, index) => {
           const risk = nodule.risk_level || 'medium';
           const location = nodule.location || 'AI';
+          const coordinates = nodule.coordinates ? JSON.parse(nodule.coordinates) : { x: 0, y: 0 };
           
           return {
             id: nodule.id || index + 1,
@@ -556,9 +596,13 @@ export default function Review(){
             notes: nodule.notes || '',
             doctorAssessment: nodule.doctor_assessment || '',
             xaiExplanations: [],
-            coordinates: nodule.coordinates ? JSON.parse(nodule.coordinates) : { x: 0, y: 0 }
+            coordinates
           };
-        }).sort((a, b) => getCandidateSortScore(b) - getCandidateSortScore(a))
+        }).map((nodule) => ({
+            ...nodule,
+            risk: getCandidateRisk(nodule)
+          }))
+          .sort((a, b) => getCandidateSortScore(b) - getCandidateSortScore(a))
           .map((nodule, index) => ({
             ...nodule,
             displayRank: index + 1
@@ -863,6 +907,8 @@ export default function Review(){
   }
 
   const currentNodule = nodules[selectedNodule];
+  const reviewedCount = nodules.filter(n => n.reviewed).length;
+  const candidateHeaderText = getCandidateHeaderText(nodules.length);
 
   return (
     <div className={`review-page ${isFullscreen ? 'fullscreen' : ''}`}>
@@ -882,7 +928,7 @@ export default function Review(){
             {study.status}
           </span>
           <span className="nodule-badge">
-            {nodules.filter(n => n.reviewed).length}/{nodules.length} Reviewed
+            {nodules.length > 0 ? `${reviewedCount}/${nodules.length} Reviewed` : 'No candidates'}
           </span>
         </div>
         <div className="header-right">
@@ -927,7 +973,7 @@ export default function Review(){
                   <div className="ai-stats-list">
                     <div className="ai-stat-row">
                       <span className="ai-stat-label">AI Candidates</span>
-                      <span className="ai-stat-value">{study.noduleCount}</span>
+                      <span className="ai-stat-value">{nodules.length}</span>
                     </div>
                     <div className="ai-stat-row">
                       <span className="ai-stat-label">High Risk</span>
@@ -1056,7 +1102,14 @@ export default function Review(){
 
         {/* Right Panel - Nodules */}
         <div className="review-right-panel">
-              <div className="panel-header"><h3>AI Candidates ({nodules.length})</h3></div>
+              <div className="panel-header">
+                <h3>AI Candidates ({nodules.length})</h3>
+                <p className="panel-subtitle">
+                  {nodules.length > 0
+                    ? 'Showing classifier-ranked review candidates'
+                    : 'No clinically significant AI candidate was selected for review'}
+                </p>
+              </div>
               <div className="nodules-list">
                 {nodules.length > 0 ? nodules.map((nodule, i) => (
                   <div key={nodule.id} className={`nodule-item ${selectedNodule === i ? 'selected' : ''} ${nodule.reviewed ? 'reviewed' : ''}`}
@@ -1067,10 +1120,21 @@ export default function Review(){
                     </div>
                     <div className="nodule-item-info">
                       <span>Slice {getValidSliceIndex(nodule, dicomFiles.length) + 1} - {nodule.size} mm eq. dia.</span>
-                      <span>{getCandidateLikelihood(nodule, nodules).toFixed(0)}% likelihood</span>
+                      <span>
+                        Seg {clampPercent(getSegmentationProbability(nodule)).toFixed(0)}%
+                        {getClassifierProbability(nodule) !== null && ` | Cls ${getCandidateLikelihood(nodule).toFixed(0)}%`}
+                      </span>
                     </div>
                   </div>
-                )) : <div className="no-nodules">No AI candidates detected</div>}
+                )) : (
+                  <div className="no-nodules">
+                    <strong>No AI candidates detected</strong>
+                    <span>
+                      The CT viewer is still available, but this study currently has no model-selected
+                      review candidate.
+                    </span>
+                  </div>
+                )}
               </div>
 
               {nodules.length > 0 && currentNodule && (
@@ -1102,10 +1166,13 @@ export default function Review(){
                         <div className="probability-bar"><div className={`probability-fill ${currentNodule.risk}`} style={{ width: `${getCandidateLikelihood(currentNodule, nodules)}%` }} /></div>
                         <span>{getCandidateLikelihood(currentNodule, nodules).toFixed(0)}%</span>
                       </div>
-                      {currentNodule.coordinates?.classificationProbability && (
+                      <div className="classification-result">
+                        <span>Segmentation probability: {getSegmentationProbability(currentNodule).toFixed(3)}</span>
+                      </div>
+                      {getClassifierProbability(currentNodule) !== null && (
                         <div className="classification-result">
                           <strong>{getClassificationLabel(currentNodule)}</strong>
-                          <span>Classifier probability: {Number(currentNodule.coordinates.classificationProbability).toFixed(3)}</span>
+                          <span>Classifier probability: {getClassifierProbability(currentNodule).toFixed(3)}</span>
                         </div>
                       )}
                     </div>
@@ -1179,6 +1246,26 @@ export default function Review(){
                   <button className="generate-report-btn" onClick={() => setShowReportModal(true)}>Save Report</button>
                 </div>
               )}
+
+              {nodules.length === 0 && (
+                <div className="nodule-details empty-details">
+                  <div className="details-header">
+                    <h4>{candidateHeaderText}</h4>
+                  </div>
+                  <div className="details-content">
+                    <div className="empty-state-card">
+                      <p>
+                        This study is currently behaving like a no-candidate case in the review UI.
+                      </p>
+                      <ul>
+                        <li>No final AI candidate was selected by the pipeline.</li>
+                        <li>Segmentation and classifier outputs did not produce a reviewable final candidate.</li>
+                        <li>You can still inspect slices manually in the viewer.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
         </div>
       </div>
 
@@ -1198,13 +1285,19 @@ export default function Review(){
               </div>
               <div className="nodules-preview">
                 <h4>AI Candidates to Include</h4>
-                {nodules.filter(n => n.includeInReport).map(nodule => (
-                  <div key={nodule.id} className="nodule-preview-item">
-                    <span>#{nodule.displayRank || nodule.id} - {nodule.location}</span><span>{getCandidateLikelihood(nodule, nodules).toFixed(0)}%</span>
-                    <span className={`risk-tag ${nodule.risk}`}>{nodule.risk}</span>
-                    {nodule.doctorAssessment && <span className={`assessment-tag ${nodule.doctorAssessment}`}>{nodule.doctorAssessment}</span>}
+                {nodules.filter(n => n.includeInReport).length > 0 ? (
+                  nodules.filter(n => n.includeInReport).map(nodule => (
+                    <div key={nodule.id} className="nodule-preview-item">
+                      <span>#{nodule.displayRank || nodule.id} - {nodule.location}</span><span>{getCandidateLikelihood(nodule, nodules).toFixed(0)}%</span>
+                      <span className={`risk-tag ${nodule.risk}`}>{nodule.risk}</span>
+                      {nodule.doctorAssessment && <span className={`assessment-tag ${nodule.doctorAssessment}`}>{nodule.doctorAssessment}</span>}
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-report-state">
+                    No AI candidate is currently included in the report.
                   </div>
-                ))}
+                )}
               </div>
               <div className="report-options">
                 <label className="checkbox-row"><input type="checkbox" defaultChecked /><span>Include AI analysis</span></label>
