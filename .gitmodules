@@ -1,4 +1,4 @@
 [submodule "ai/Pulmo"]
 	path = ai/Pulmo
 	url = https://github.com/fc63/Pulmo.git
-	branch = v1
+	branch = v3
