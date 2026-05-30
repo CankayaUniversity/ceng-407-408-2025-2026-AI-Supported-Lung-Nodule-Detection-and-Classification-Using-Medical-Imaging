@@ -174,9 +174,8 @@ async def analyze(request: AnalyzeRequest):
     if not STAGE2_PTH.exists():
         raise HTTPException(status_code=400, detail="Model not downloaded. Call /download first.")
     try:
-        from modeling import find_candidates, CONCEPT_NAMES
-
         _, stage2 = _get_models()
+        from modeling import find_candidates, CONCEPT_NAMES
         volume, dcm_files, spacing = _load_dicom_series(request.dicom_folder)
         Z, H, W = volume.shape
         st, sy, sx = spacing
@@ -338,6 +337,7 @@ def _get_models():
         spec = importlib.util.spec_from_file_location("pulmo_modeling", str(MODELING_PY))
         mod  = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
         sys.modules["pulmo_modeling"] = mod
+        sys.modules["modeling"] = mod
         _stage2 = mod.load_stage2(str(STAGE2_PTH), device="cpu")
         print("[MODELS] Stage 2 (Student2p5D) loaded", flush=True)
         return _stage1, _stage2
