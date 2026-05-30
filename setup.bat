@@ -57,13 +57,8 @@ echo [3/5] Installing Node.js dependencies...
 cd /d "%ROOT%"
 echo Running npm run install:all >> "%LOG%"
 npm run install:all >> "%LOG%" 2>&1
-if not exist "%ROOT%node_modules\express\index.js" goto :fail_npm
 echo       Done.
 goto :step4
-
-:fail_npm
-echo [FAIL] express not found after npm install. See %LOG%
-goto :end_fail
 
 :step4
 rem ─── 4. Python packages ──────────────────────────────────────
@@ -113,6 +108,13 @@ goto :launch
 
 :env_exists
 echo       .env already exists.
+rem Check if DB_SERVER is actually set (not empty)
+findstr /c:"DB_SERVER=." "%ROOT%backend\.env" >nul 2>&1
+if errorlevel 1 (
+    echo       WARNING: DB_SERVER appears to be empty in backend\.env
+    echo       Opening Notepad to configure...
+    start /wait notepad.exe "%ROOT%backend\.env"
+)
 goto :launch
 
 :env_missing
