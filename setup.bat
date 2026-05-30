@@ -31,7 +31,7 @@ echo.
 echo [3/5] Installing Node.js dependencies...
 echo       Running npm run install:all  (this may take ~30 seconds)...
 cd /d "%ROOT%"
-npm run install:all
+call npm run install:all
 echo       Node.js dependencies ready.
 
 rem ─── 4. Python packages ─────────────────────────────────────
