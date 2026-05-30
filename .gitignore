@@ -35,3 +35,13 @@ lung25demo/
 
 # AI service model weights and cache (large binary files, downloaded from HuggingFace)
 backend/ai_service/model/
+
+# Database (contains user data)
+backend/database.sqlite
+*.sqlite
+*.sqlite3
+*.db
+
+# Python bytecode
+__pycache__/
+*.py[cod]
