@@ -1,131 +1,91 @@
 @echo off
-setlocal EnableDelayedExpansion
+title LungXAI Setup
+setlocal
 
 set "ROOT=%~dp0"
-set "LOG=%ROOT%setup_log.txt"
-
-if "%1"=="--child" goto :run_setup
-
-start "LungXAI Setup" cmd /k ""%~f0" --child & echo. & echo Press any key to close... & pause > nul"
-exit /b 0
-
-:run_setup
-echo ============================================================ >> "%LOG%"
-echo   LungXAI Setup Log - %date% %time% >> "%LOG%"
-echo ============================================================ >> "%LOG%"
 
 echo ============================================================
 echo   LungXAI - First-Time Setup
 echo ============================================================
 echo.
-echo   Log file: %LOG%
 echo   If you cloned WITHOUT --recurse-submodules, run first:
 echo     git submodule update --init --recursive
 echo ============================================================
 echo.
 
-rem ─── 1. Node.js ─────────────────────────────────────────────
+rem ─── 1. Check Node.js ───────────────────────────────────────
 echo [1/5] Checking Node.js...
-where node >> "%LOG%" 2>&1
+where node >nul 2>&1
 if errorlevel 1 goto :fail_nodejs
-for /f "tokens=*" %%v in ('node -v 2^>nul') do echo       Node.js %%v found.
-goto :step2
+for /f "tokens=*" %%v in ('node -v') do echo       Node.js %%v found.
 
-:fail_nodejs
-echo [FAIL] Node.js is not installed.
-echo        Install from: https://nodejs.org
-goto :end_fail
-
-:step2
-rem ─── 2. Python ───────────────────────────────────────────────
+rem ─── 2. Check Python ────────────────────────────────────────
 echo.
 echo [2/5] Checking Python...
-where python >> "%LOG%" 2>&1
+where python >nul 2>&1
 if errorlevel 1 goto :fail_python
-for /f "tokens=*" %%v in ('python --version 2^>nul') do echo       %%v found.
-goto :step3
+for /f "tokens=*" %%v in ('python --version') do echo       %%v found.
 
-:fail_python
-echo [FAIL] Python is not installed.
-echo        Install from: https://python.org
-goto :end_fail
-
-:step3
-rem ─── 3. npm install ──────────────────────────────────────────
+rem ─── 3. npm install ─────────────────────────────────────────
 echo.
 echo [3/5] Installing Node.js dependencies...
+echo       Running npm run install:all  (this may take ~30 seconds)...
 cd /d "%ROOT%"
-echo Running npm run install:all >> "%LOG%"
-npm run install:all >> "%LOG%" 2>&1
-echo       Done.
-goto :step4
+npm run install:all
+echo       Node.js dependencies ready.
 
-:step4
-rem ─── 4. Python packages ──────────────────────────────────────
+rem ─── 4. Python packages ─────────────────────────────────────
 echo.
 echo [4/5] Installing Python dependencies...
-cd /d "%ROOT%"
-python -c "import cv2, torch, monai, pydicom, fastapi, uvicorn; print('OK')" > "%TEMP%\lungxai_pycheck.txt" 2>&1
-findstr /c:"OK" "%TEMP%\lungxai_pycheck.txt" >nul 2>&1
+python -c "import cv2, torch, monai, pydicom, fastapi, uvicorn" >nul 2>&1
 if errorlevel 1 goto :install_python
 echo       Already installed, skipping.
 goto :step5
 
 :install_python
 echo       Installing packages (this may take a few minutes)...
-pip install -r "%ROOT%backend\requirements.txt" >> "%LOG%" 2>&1
+pip install -r "%ROOT%backend\requirements.txt"
 if errorlevel 1 goto :fail_pip
-pip install -r "%ROOT%backend\ai_service\requirements.txt" >> "%LOG%" 2>&1
+pip install -r "%ROOT%backend\ai_service\requirements.txt"
 if errorlevel 1 goto :fail_pip
-echo       Done.
-goto :step5
+echo       Python dependencies ready.
 
-:fail_pip
-echo [FAIL] pip install failed. See %LOG%
-goto :end_fail
-
+rem ─── 5. .env ────────────────────────────────────────────────
 :step5
-rem ─── 5. .env ─────────────────────────────────────────────────
 echo.
 echo [5/5] Configuring backend .env...
-if exist "%ROOT%backend\.env" goto :env_exists
-if not exist "%ROOT%backend\.env.example" goto :env_missing
+if exist "%ROOT%backend\.env" goto :check_env
 
+if not exist "%ROOT%backend\.env.example" goto :env_missing
 copy "%ROOT%backend\.env.example" "%ROOT%backend\.env" >nul
 echo       Created backend\.env from .env.example
+
+:check_env
+findstr /c:"DB_SERVER=." "%ROOT%backend\.env" >nul 2>&1
+if not errorlevel 1 goto :env_ok
 echo.
 echo  *** ACTION REQUIRED ***
-echo  You must set DB_SERVER in backend\.env before the backend can start.
-echo  Opening the file in Notepad now...
-echo.
-echo  Set: DB_SERVER=.\SQLEXPRESS  (most common)
-echo       DB_SERVER=localhost\SQLEXPRESS
-echo       DB_SERVER=BMD\SQLEXPRESS01  (example custom instance)
+echo  DB_SERVER is not set in backend\.env
+echo  Opening Notepad — set DB_SERVER to your SQL Server instance:
+echo    DB_SERVER=.\SQLEXPRESS         (most common)
+echo    DB_SERVER=localhost\SQLEXPRESS
 echo.
 start /wait notepad.exe "%ROOT%backend\.env"
-echo       .env configured. Continuing...
+echo       .env saved. Continuing...
 goto :launch
 
-:env_exists
-echo       .env already exists.
-rem Check if DB_SERVER is actually set (not empty)
-findstr /c:"DB_SERVER=." "%ROOT%backend\.env" >nul 2>&1
-if errorlevel 1 (
-    echo       WARNING: DB_SERVER appears to be empty in backend\.env
-    echo       Opening Notepad to configure...
-    start /wait notepad.exe "%ROOT%backend\.env"
-)
+:env_ok
+echo       .env is configured.
 goto :launch
 
 :env_missing
 echo       WARNING: .env.example not found. Create backend\.env manually.
-goto :launch
 
+rem ─── Launch ─────────────────────────────────────────────────
 :launch
-rem ─── Start services ──────────────────────────────────────────
 echo.
 echo ============================================================
-echo   Setup complete! Opening services in separate windows...
+echo   Setup complete! Starting LungXAI...
 echo ============================================================
 echo.
 echo   Backend:    http://localhost:3001
@@ -139,23 +99,33 @@ start "LungXAI AI Service" cmd /k "cd /d "%ROOT%backend\ai_service" && pip insta
 timeout /t 2 /nobreak >nul
 start "LungXAI Frontend"   cmd /k "cd /d "%ROOT%UI" && npm run dev"
 
-echo   Done. All three windows are starting.
-timeout /t 3 /nobreak >nul
+echo   All three windows are opening. You can close this window.
+echo.
+pause
 exit /b 0
 
-:end_fail
+rem ─── Error messages ─────────────────────────────────────────
+:fail_nodejs
 echo.
-echo ============================================================
-echo   SETUP FAILED
-echo ============================================================
-echo   Log: %LOG%
+echo [FAIL] Node.js is not installed.
+echo        Install LTS from: https://nodejs.org
+echo        Then re-run setup.bat
+goto :fail_end
+
+:fail_python
 echo.
-echo   Manual steps:
-echo     1. npm install              (project root)
-echo     2. pip install -r backend\requirements.txt
-echo     3. pip install -r backend\ai_service\requirements.txt
-echo     4. Copy backend\.env.example to backend\.env
-echo     5. Set DB_SERVER in backend\.env
-echo     6. Run start.bat
-echo ============================================================
+echo [FAIL] Python is not installed.
+echo        Install 3.9+ from: https://python.org
+echo        Then re-run setup.bat
+goto :fail_end
+
+:fail_pip
+echo.
+echo [FAIL] pip install failed. Check your internet connection.
+echo        Try manually: pip install -r backend\requirements.txt
+goto :fail_end
+
+:fail_end
+echo.
+pause
 exit /b 1
