@@ -59,21 +59,14 @@ for /f "tokens=*" %%v in ('python --version 2^>nul') do (
 echo.
 echo [3/5] Installing Node.js dependencies...
 cd /d "%ROOT%"
+echo Running: npm run install:all >> "%LOG%"
+npm run install:all >> "%LOG%" 2>&1
 if exist "%ROOT%node_modules\express\index.js" (
-    echo       Already installed, skipping.
-    echo npm deps: already installed >> "%LOG%"
-) else (
-    echo       Running npm run install:all (root + backend + UI)...
-    echo Running: npm run install:all >> "%LOG%"
-    npm run install:all >> "%LOG%" 2>&1
-    :: Verify by actually requiring express from backend context
-    node --no-warnings -e "process.chdir('%ROOT%backend'); require('express'); process.exit(0);" >nul 2>&1
-    if !errorlevel! neq 0 (
-        echo [FAIL] express cannot be loaded from backend. See %LOG% >> "%LOG%"
-        echo [FAIL] Node.js dependencies missing. See %LOG% for details.
-        goto :end_fail
-    )
     echo       Done.
+) else (
+    echo [FAIL] express not found after install. See %LOG% >> "%LOG%"
+    echo [FAIL] npm install failed. See %LOG% for details.
+    goto :end_fail
 )
 
 :: ─── 4. Python packages ────────────────────────────────────
