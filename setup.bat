@@ -64,8 +64,8 @@ if exist "%ROOT%node_modules\express\index.js" (
     echo npm deps: already installed >> "%LOG%"
 ) else (
     echo       Running npm install from project root...
-    echo Running: npm install >> "%LOG%"
-    npm install >> "%LOG%" 2>&1
+    echo Running: npm install --no-audit >> "%LOG%"
+    npm install --no-audit >> "%LOG%" 2>&1
     if !errorlevel! neq 0 (
         echo [FAIL] npm install failed. See %LOG% >> "%LOG%"
         echo [FAIL] npm install failed. See %LOG% for details.
