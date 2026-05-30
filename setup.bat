@@ -63,13 +63,14 @@ if exist "%ROOT%node_modules\express\index.js" (
     echo       Already installed, skipping.
     echo npm deps: already installed >> "%LOG%"
 ) else (
-    echo       Running npm install from project root...
-    echo Running: npm install --no-audit --fund false >> "%LOG%"
-    npm install --no-audit --fund false >> "%LOG%" 2>&1
-    :: Verify by checking if express was actually installed (don't trust npm exit code)
-    if not exist "%ROOT%node_modules\express\index.js" (
-        echo [FAIL] npm install failed - express not found >> "%LOG%"
-        echo [FAIL] npm install failed. See %LOG% for details.
+    echo       Running npm run install:all (root + backend + UI)...
+    echo Running: npm run install:all >> "%LOG%"
+    npm run install:all >> "%LOG%" 2>&1
+    :: Verify by actually requiring express from backend context
+    node --no-warnings -e "process.chdir('%ROOT%backend'); require('express'); process.exit(0);" >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo [FAIL] express cannot be loaded from backend. See %LOG% >> "%LOG%"
+        echo [FAIL] Node.js dependencies missing. See %LOG% for details.
         goto :end_fail
     )
     echo       Done.
@@ -121,11 +122,27 @@ if exist "%ROOT%backend\.env" (
 :: ─── Launch ────────────────────────────────────────────────
 echo.
 echo ============================================================
-echo   Setup complete! Starting LungXAI...
+echo   Setup complete!
+echo   Opening LungXAI services in separate windows...
 echo ============================================================
 echo.
+echo   Backend will open at:   http://localhost:3001
+echo   AI Service will open at: http://localhost:3002
+echo   Frontend will open at:  http://localhost:5173
+echo.
+
 cd /d "%ROOT%"
-call "%ROOT%start.bat"
+
+start "LungXAI Backend" cmd /k "cd /d "%ROOT%backend" && node server.js"
+timeout /t 2 /nobreak >nul
+start "LungXAI AI Service" cmd /k "cd /d "%ROOT%backend\ai_service" && pip install -r requirements.txt -q && python main.py"
+timeout /t 2 /nobreak >nul
+start "LungXAI Frontend" cmd /k "cd /d "%ROOT%UI" && npm run dev"
+
+echo   Three windows are starting. This setup window will close.
+echo   If any window closes immediately, check the error inside it.
+echo.
+timeout /t 3 /nobreak >nul
 exit /b 0
 
 :end_fail
