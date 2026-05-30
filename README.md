@@ -7,86 +7,93 @@
 
 ## Team Members
 
-- Can Berk Meşe — 202111045  
-- Orkun Oğuztürk — 202111078  
-- Barbaros Murat Dönmez — 202011019  
-- Ömer Faruk Şahin — 202111073  
-- Arda Kaan Bakır — 202111064  
-- Furkan Çoban — 202011204  
-- Elif Güngör — 202111077  
+- Can Berk Meşe — 202111045
+- Orkun Oğuztürk — 202111078
+- Barbaros Murat Dönmez — 202011019
+- Ömer Faruk Şahin — 202111073
+- Arda Kaan Bakır — 202111064
+- Ariyul İstanbul — 202011204
+- Elif Güngör — 202111077
 
 ---
 
 ## Supervisor
 
-Dr. Öğr. Üyesi Doç. Dr. Ayşe Nurdan SARAN  
-Department of Computer Engineering  
+Dr. Öğr. Üyesi Doç. Dr. Ayşe Nurdan SARAN
+Department of Computer Engineering
 Çankaya University
 
 ---
 
 ## Course Information
 
-- CENG 407 – Software Development Project I  
-- Fall 2025–2026  
+- CENG 407 – Software Development Project I — Fall 2025–2026
+- CENG 408 – Software Development Project II — Spring 2025–2026
 
 ---
 
 ## Abstract
 
-This project aims to develop an AI-supported medical imaging system capable of detecting and classifying lung nodules in CT scans.  
-The proposed system leverages deep learning models, particularly convolutional neural networks (CNNs), combined with Explainable AI (XAI) techniques to improve interpretability and clinical trust.
+This project presents an AI-supported medical imaging system for detecting and classifying pulmonary nodules in chest CT scans. The system integrates a two-stage deep learning pipeline with Explainable AI (XAI) techniques to provide clinically interpretable results alongside automated detections.
 
-The ultimate goal is to assist radiologists in early lung cancer detection and enhance diagnostic accuracy through a transparent, efficient, and user-friendly tool.
+The pipeline chains a 3D nodule-centre detector (Stage 1) with a 2.5D concept-bottleneck multi-task characteriser (Stage 2) that jointly predicts detection confidence, malignancy probability, eight radiological concepts, and a per-nodule segmentation mask. Because malignancy is predicted solely from the eight concepts, every decision is fully attributable to human-interpretable radiological features.
+
+The goal is to assist radiologists in early lung cancer screening and improve diagnostic confidence through a transparent, efficient, and user-friendly clinical decision support tool.
 
 ---
 
-## Structural Overview of the Repository
+## Repository Structure
 
 ```
-UI/                     # Frontend interface
-backend/                # Backend services & API
-ai/                     # AI & ML components (Git submodule)
-└── Pulmo/               # Lung AI pipeline (submodule)
+UI/                     # React frontend (Vite)
+backend/                # Node.js API server + Python AI service
+ai/                     # AI & ML components
+└── Pulmo/              # Two-stage lung nodule pipeline (Git submodule)
 ```
 
-> **Important:**  
-> The `ai/Pulmo` directory is a **Git submodule** and must be initialized after cloning.
+> **Note:** The `ai/Pulmo` directory is a Git submodule and must be initialised after cloning.
 
 ---
 
 ## AI Module (Pulmo)
 
-The **Pulmo** module contains the AI-driven deep learning pipeline for lung nodule detection and classification.
+The **Pulmo** submodule contains the complete deep learning pipeline for lung nodule detection and classification, developed and versioned independently from the application layer.
 
-It is developed and versioned **independently** from the main repository and integrated via a **Git submodule**.  
-This separation enables clean experimentation, reproducibility, and minimal coupling with UI and backend components.
+### Pipeline Overview
 
-### Core Model Ownership
+| Stage | Model | Task |
+|-------|-------|------|
+| Stage 1 | HeatmapUNet3D | Detect nodule centres in the full CT volume via a 3D sliding-window heatmap |
+| Stage 2 | Student2p5D | Per-candidate characterisation: detection, malignancy, 8 radiological concepts, segmentation |
 
--  The core lung nodule detection model is maintained by **[fc63](https://github.com/fc63)**.
-- It resides in the `ai/Pulmo` Git submodule (branch `v1`).
-- The core model is treated as **read-only** within this repository.
+### Performance (Internal Held-Out Test Split — LUNA16)
 
-For detailed ownership rules and development policy, see [MODEL.md](MODEL.md).
+**Stage 2 — Characterisation (patch level)**
 
-### Experiments & Proposals
+| Task | Metric | Score |
+|------|--------|-------|
+| Detection | AUC | 0.9981 \[95% CI 0.9961–0.9995\] |
+| Malignancy | AUC | 0.9862 \[95% CI 0.9621–1.0000\] |
+| Segmentation | Dice | 0.8573 \[95% CI 0.8447–0.8700\] |
 
-- Experimental ideas and external proposals are archived as patches under `patches/`.
-- These do not modify the core model unless explicitly reviewed and approved.
+**Stage 1 — Detection (scan level, FROC)**
 
-### Submodule Rules
+| Metric | Value |
+|--------|-------|
+| CPM (mean sensitivity @ 1/8…8 FP/scan) | 0.629 |
+| Sensitivity @ 16 FP/scan | 0.956 |
+| Mean centre distance | 1.85 mm |
 
-- The `ai/Pulmo` directory must be managed strictly as a Git submodule.
-- Do not manually copy files into or out of the submodule.
-- Files originating from the `ai/Pulmo` submodule must never be copied, duplicated, or committed into the main repository.
-- All AI-related development must be performed inside the Pulmo repository.
+> Patient-level 80/10/10 split of LUNA16. Metrics are internal; the system has not been externally validated.
+
+### Submodule Reference
+
+- **Repository:** https://github.com/ariyulistanbul/Pulmo
+- **Location:** `ai/Pulmo`
 
 ---
 
 ## Build & Run (Quick Start)
-
-This section allows external users to clone, initialize, and run the project locally.
 
 ### Clone (First Time)
 
@@ -102,28 +109,31 @@ git submodule update --init --recursive
 
 ### Pulling Updates
 
-Step-by-step commands:
-```bash
-git pull
-git submodule update --init --recursive
-```
-
-One-line version:
-
 ```bash
 git pull && git submodule update --init --recursive
 ```
 
-### UI Setup
+### Running the Application
 
-For UI installation and local execution instructions, see [UI_Setup.md](UI_Setup.md).
+```bash
+start.bat
+```
+
+This starts all three services:
+
+| Service | URL |
+|---------|-----|
+| Backend API | http://localhost:3001 |
+| AI Service | http://localhost:3002 |
+| Frontend | http://localhost:5173 |
+
+For detailed UI setup instructions, see [UI_Setup.md](UI_Setup.md).
 
 ---
 
 ## Disclaimer
 
-This project is developed for academic and research purposes only  
-and is not intended for clinical use.
+This project is developed for academic and research purposes only and is not intended for clinical diagnosis or medical use.
 
 ---
 
