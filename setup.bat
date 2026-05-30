@@ -64,10 +64,11 @@ if exist "%ROOT%node_modules\express\index.js" (
     echo npm deps: already installed >> "%LOG%"
 ) else (
     echo       Running npm install from project root...
-    echo Running: npm install --no-audit >> "%LOG%"
-    npm install --no-audit >> "%LOG%" 2>&1
-    if !errorlevel! neq 0 (
-        echo [FAIL] npm install failed. See %LOG% >> "%LOG%"
+    echo Running: npm install --no-audit --fund false >> "%LOG%"
+    npm install --no-audit --fund false >> "%LOG%" 2>&1
+    :: Verify by checking if express was actually installed (don't trust npm exit code)
+    if not exist "%ROOT%node_modules\express\index.js" (
+        echo [FAIL] npm install failed - express not found >> "%LOG%"
         echo [FAIL] npm install failed. See %LOG% for details.
         goto :end_fail
     )
@@ -78,7 +79,8 @@ if exist "%ROOT%node_modules\express\index.js" (
 echo.
 echo [4/5] Installing Python dependencies...
 cd /d "%ROOT%"
-python -c "import cv2, torch, monai, pydicom, fastapi, uvicorn" >> "%LOG%" 2>&1
+python -c "import cv2, torch, monai, pydicom, fastapi, uvicorn; print('OK')" > "%TEMP%\lungxai_pycheck.txt" 2>&1
+findstr /c:"OK" "%TEMP%\lungxai_pycheck.txt" >nul 2>&1
 if !errorlevel! neq 0 (
     echo       Installing packages (this may take a few minutes)...
     echo pip install backend/requirements.txt >> "%LOG%"
