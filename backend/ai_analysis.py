@@ -703,8 +703,8 @@ def analyze_dicom_study(study_dir: str,
         if classifier_model_path is None:
             classifier_model_path = os.path.join(
                 os.path.dirname(__file__),
-                'models',
-                'ogrenci_model_25D_full.pt.zip'
+                '..', 'ai', 'models',
+                'ogrenci_model_25D_full.pt'
             )
         logger.info(f"Loading student classifier from {classifier_model_path}...")
         classifier = load_student_classifier(classifier_model_path, device=device)

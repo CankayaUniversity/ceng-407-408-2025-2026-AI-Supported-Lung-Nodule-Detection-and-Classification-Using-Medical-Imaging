@@ -4,7 +4,8 @@
 
 The Pulmo pipeline is a two-stage deep learning system for pulmonary nodule detection and characterisation in chest CT scans. It is maintained as a Git submodule at `ai/Pulmo` and developed independently from the application layer.
 
-- **Repository:** https://github.com/ariyulistanbul/Pulmo
+- **GitHub Repository:** https://github.com/ariyulistanbul/Pulmo
+- **HuggingFace Model:** https://huggingface.co/ariyul/Pulmo
 - **Current version:** v3
 
 ---

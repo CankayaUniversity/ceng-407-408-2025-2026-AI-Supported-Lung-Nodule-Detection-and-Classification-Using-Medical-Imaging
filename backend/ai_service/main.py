@@ -57,7 +57,7 @@ class GroundTruthRequest(BaseModel):
 
 @app.get("/status")
 def get_status():
-    downloaded = STAGE1_PTH.exists() and STAGE2_PTH.exists() and MODELING_PY.exists()
+    downloaded = STAGE2_PTH.exists() and MODELING_PY.exists()
     return {
         "downloaded": downloaded,
         "model_dir": str(MODEL_DIR),
@@ -102,71 +102,195 @@ def _run_download():
         _download_status.update({"status": "error", "progress": 0, "message": str(e)})
 
 
+NMS_MM      = 20.0  # aggressive NMS — suppress duplicates up to 20 mm
+STRIDE_Z    = 6     # only used when SW fallback runs
+STRIDE_XY   = 16
+BATCH_SIZE  = 16
+LUNG_DILATE = 3     # 3 px ≈ 2 mm margin — captures only genuine subpleural nodules
+
+# Stage 1 pre-selects centres → Stage 2 bar is moderate
+DET_THRESH_S1 = 0.25
+# SW is a last resort (Stage-1 found nothing) → keep FPs low
+DET_THRESH_SW = 0.55
+
+
+def _stage2_on_candidates(stage2, volume, lung_filled, positions, spacing,
+                           det_threshold=DET_THRESH_SW):
+    """Run Stage 2 (Student2p5D) on a list of (z,y,x) candidate positions.
+    Returns raw_dets list of (z,y,x, det_p, mal_p, seg, concepts)."""
+    import torch
+    from modeling import CONCEPT_NAMES
+    Z, H, W = volume.shape
+    half = HALF
+
+    vol_norm = np.clip(volume, -1000, 1000).astype(np.float32)
+    vol_norm = (vol_norm + 1000) / 2000
+
+    raw_dets = []
+    for i in range(0, len(positions), BATCH_SIZE):
+        batch_pos = positions[i:i + BATCH_SIZE]
+        tensors, valid_pos = [], []
+        for (z, y, x) in batch_pos:
+            z0 = z - 3
+            if z0 < 0 or z0 + 7 > Z: continue
+            if not (half <= y < H - half and half <= x < W - half): continue
+            patch = vol_norm[z0:z0+7, y-half:y+half, x-half:x+half]
+            if patch.shape != (7, PATCH, PATCH): continue
+            tensors.append(torch.from_numpy(patch).float())
+            valid_pos.append((z, y, x))
+        if not tensors: continue
+        xb = torch.stack(tensors)
+        with torch.no_grad():
+            out = stage2(xb)
+        det_ps = torch.softmax(out["detection"],  dim=1)[:, 1].cpu().numpy()
+        mal_ps = torch.softmax(out["malignancy"], dim=1)[:, 1].cpu().numpy()
+        segs   = torch.sigmoid(out["segmentation"]).cpu().numpy()  # (B,1,64,64)
+        concs  = out["concepts"].cpu().numpy()                     # (B,8)
+        for j, pos in enumerate(valid_pos):
+            if det_ps[j] >= det_threshold:
+                raw_dets.append((*pos, float(det_ps[j]), float(mal_ps[j]),
+                                 segs[j, 0], concs[j]))
+    return raw_dets
+
+
+def _greedy_nms(raw_dets, spacing):
+    """Greedy NMS in mm space. Sort by det_prob desc, suppress closer than NMS_MM."""
+    st, sy, sx = spacing
+    raw_dets.sort(key=lambda d: -d[3])
+    kept = []
+    for det in raw_dets:
+        z, y, x = det[0], det[1], det[2]
+        too_close = any(
+            ((z - k[0])*st)**2 + ((y - k[1])*sy)**2 + ((x - k[2])*sx)**2 < NMS_MM**2
+            for k in kept
+        )
+        if not too_close:
+            kept.append(det)
+    return kept
+
+
 @app.post("/analyze")
 async def analyze(request: AnalyzeRequest):
-    if not STAGE1_PTH.exists() or not STAGE2_PTH.exists():
-        raise HTTPException(status_code=400, detail="Models not downloaded. Call /download first.")
+    if not STAGE2_PTH.exists():
+        raise HTTPException(status_code=400, detail="Model not downloaded. Call /download first.")
     try:
-        import torch
-        stage1, stage2 = _get_models()
+        from modeling import find_candidates, CONCEPT_NAMES
+
+        _, stage2 = _get_models()
         volume, dcm_files, spacing = _load_dicom_series(request.dicom_folder)
+        Z, H, W = volume.shape
+        st, sy, sx = spacing
         print(f"[ANALYZE] volume={volume.shape}  spacing={spacing}", flush=True)
 
-        # ── Lung mask (simple threshold + connected components) ────────────────
-        lung_mask   = _compute_lung_mask(volume)
-        lung_filled = _fill_lung_mask(volume, lung_mask)
-        print(f"[ANALYZE] lung voxels={lung_filled.sum()}", flush=True)
+        # ── 1. Lung mask — dilate to capture subpleural / perifissural nodules ──
+        from scipy.ndimage import binary_dilation
+        lung_mask      = _compute_lung_mask(volume)
+        lung_filled    = _fill_lung_mask(volume, lung_mask)
+        # Dilate: solid nodules at the pleural surface are outside raw lung_filled
+        lung_search    = binary_dilation(lung_filled,
+                                         iterations=LUNG_DILATE).astype(bool)
+        print(f"[ANALYZE] lung voxels (filled={int(lung_filled.sum())} "
+              f"dilated={int(lung_search.sum())})", flush=True)
 
-        # ── Stage 1: find candidates with lower threshold ──────────────────────
-        from modeling import find_candidates, crop_stage2_input, explain_malignancy, CONCEPT_NAMES
-        cands_all = find_candidates(stage1, volume, spacing, device="cpu",
-                                    peak_thresh=0.05)
-        print(f"[ANALYZE] stage1 raw candidates={len(cands_all)}", flush=True)
+        # ── 2. Stage 1 — find nodule centres with isotropic resampling ─────────
+        from scipy.ndimage import zoom as nd_zoom
+        stage1_cands = []
+        if _stage1 is not None:
+            try:
+                # Stage 1 was trained on ~1 mm isotropic data
+                TARGET_MM = 1.0
+                zf = tuple(s / TARGET_MM for s in spacing)
+                if any(abs(f - 1.0) > 0.08 for f in zf):
+                    print(f"[ANALYZE] Stage-1 resampling zoom={[round(f,3) for f in zf]}",
+                          flush=True)
+                    vol_iso = nd_zoom(volume, zf, order=1, prefilter=False)
+                    sp_iso  = (TARGET_MM, TARGET_MM, TARGET_MM)
+                else:
+                    vol_iso, sp_iso = volume, spacing
 
-        # ── Filter candidates to lung region ──────────────────────────────────
-        # Direct membership check: candidate voxel must be inside the per-lobe
-        # filled lung mask. No margin — the per-lobe fill already includes
-        # vessels/nodules that appear as "holes" inside the parenchyma.
-        # HU gate: nodules are soft tissue (-900 to +200 HU).
-        Z, H, W = volume.shape
-        cands = []
-        for (z, y, x) in cands_all:
-            if z < 0 or z >= Z or y < 0 or y >= H or x < 0 or x >= W:
-                continue
-            hu = float(volume[z, y, x])
-            if hu > 200 or hu < -900:
-                continue
-            if lung_filled[z, y, x]:
-                cands.append((z, y, x))
-        print(f"[ANALYZE] candidates after lung filter={len(cands)}", flush=True)
+                raw_s1 = find_candidates(_stage1, vol_iso, sp_iso,
+                                         device="cpu", peak_thresh=0.02)
+                # Map iso coords → original coords, then filter to dilated lung
+                iz_s = volume.shape[0] / vol_iso.shape[0]
+                iy_s = volume.shape[1] / vol_iso.shape[1]
+                ix_s = volume.shape[2] / vol_iso.shape[2]
+                for (iz, iy, ix) in raw_s1:
+                    oz = int(round(iz * iz_s))
+                    oy = int(round(iy * iy_s))
+                    ox = int(round(ix * ix_s))
+                    if not (0 <= oz < Z and 0 <= oy < H and 0 <= ox < W):
+                        continue
+                    hu = float(volume[oz, oy, ox])
+                    if hu > 300 or hu < -950:   # hard HU gate only
+                        continue
+                    if lung_search[oz, oy, ox]:
+                        stage1_cands.append((oz, oy, ox))
+                print(f"[ANALYZE] Stage-1 candidates (in lung)={len(stage1_cands)}",
+                      flush=True)
+            except Exception as e:
+                print(f"[ANALYZE] Stage-1 failed: {e} — skipping", flush=True)
 
-        # ── Stage 2: classify / segment each candidate ─────────────────────────
-        findings = []
-        for (z, y, x) in cands:
-            xin = crop_stage2_input(volume, (z, y, x))
-            with torch.no_grad():
-                out = stage2(xin)
-            det_p = torch.softmax(out["detection"][0], 0)[1].item()
-            if det_p < 0.5:
-                continue
-            mal_p    = torch.softmax(out["malignancy"][0], 0)[1].item()
-            seg      = torch.sigmoid(out["segmentation"][0, 0]).cpu().numpy()
-            concepts = out["concepts"][0].cpu().numpy()
-            findings.append({
-                "location_voxel": (int(z), int(y), int(x)),
-                "detection_prob":  det_p,
-                "malignancy_prob": mal_p,
-                "prediction":      "MALIGNANT" if mal_p >= 0.5 else "BENIGN",
-                "segmentation":    seg,
-                "concepts":        {n: float(v) for n, v in zip(CONCEPT_NAMES, concepts)},
-                "top_reasons":     explain_malignancy(stage2, out)[:3],
-            })
+        # ── 3. Lung-context validator ──────────────────────────────────────────
+        # A true lung nodule is surrounded by air-density tissue.
+        # Liver / diaphragm / mediastinum have no surrounding air → fail this test.
+        def _has_lung_context(z, y, x, margin=10, min_air_frac=0.35):
+            """True if ≥35% of the IMMEDIATE neighbourhood (same slice ±1) is air.
+            Uses a tight 20×20 patch so liver/diaphragm solid tissue fails the test
+            even when there is distant lung air in the same slice."""
+            z0, z1 = max(0, z - 1), min(Z, z + 2)   # only ±1 slice
+            y0, y1 = max(0, y - margin), min(H, y + margin)
+            x0, x1 = max(0, x - margin), min(W, x + margin)
+            patch = volume[z0:z1, y0:y1, x0:x1]
+            return float((patch < -400).mean()) >= min_air_frac
+
+        # Filter Stage-1 candidates
+        stage1_cands = [c for c in stage1_cands if _has_lung_context(*c)]
+        print(f"[ANALYZE] Stage-1 after lung-context filter={len(stage1_cands)}", flush=True)
+
+        # ── 4. Stage 2 on Stage-1 candidates ──────────────────────────────────
+        raw_dets = _stage2_on_candidates(stage2, volume, lung_search,
+                                         stage1_cands, spacing,
+                                         det_threshold=DET_THRESH_S1)
+        print(f"[ANALYZE] Stage-2 on Stage-1 → {len(raw_dets)} detections", flush=True)
+
+        # ── 5. Sliding window — always runs to catch GGOs / Stage-1 misses ───
+        # High threshold keeps FPs low; NMS suppresses duplicates near S1 hits.
+        lung_z = np.where(lung_search.any(axis=(1, 2)))[0]
+        if len(lung_z) > 0:
+            z_lo, z_hi = int(lung_z[0]), int(lung_z[-1])
+            sw_positions = [
+                (z, y, x)
+                for z in range(max(HALF, z_lo), min(Z - HALF, z_hi + 1), STRIDE_Z)
+                for y in range(HALF, H - HALF, STRIDE_XY)
+                for x in range(HALF, W - HALF, STRIDE_XY)
+                if lung_search[z, y, x] and _has_lung_context(z, y, x)
+            ]
+            print(f"[ANALYZE] SW positions={len(sw_positions)}", flush=True)
+            sw_dets = _stage2_on_candidates(stage2, volume, lung_search,
+                                            sw_positions, spacing,
+                                            det_threshold=DET_THRESH_SW)
+            print(f"[ANALYZE] SW detections={len(sw_dets)}", flush=True)
+            raw_dets.extend(sw_dets)
+
+        # ── 5. NMS over all candidates ────────────────────────────────────────
+        kept = _greedy_nms(raw_dets, spacing)
+        print(f"[ANALYZE] after NMS={len(kept)}", flush=True)
+
+        # ── 6. Build result nodules ────────────────────────────────────────────
+        findings = [{
+            "location_voxel": (int(z), int(y), int(x)),
+            "detection_prob":  det_p,
+            "malignancy_prob": mal_p,
+            "prediction":      "MALIGNANT" if mal_p >= 0.5 else "BENIGN",
+            "segmentation":    seg,
+            "concepts":        {n: float(v) for n, v in zip(CONCEPT_NAMES, conc)},
+            "top_reasons":     [],
+        } for (z, y, x, det_p, mal_p, seg, conc) in kept]
 
         findings.sort(key=lambda f: -f["malignancy_prob"])
-        print(f"[ANALYZE] findings after stage2={len(findings)}", flush=True)
-
         nodules = _build_nodule_results(findings, volume, spacing,
                                         request.dicom_folder, request.study_id)
+        print(f"[ANALYZE] final nodules (≥{MIN_SIZE_MM}mm)={len(nodules)}", flush=True)
         return {"nodules": nodules, "total_slices": len(dcm_files)}
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -203,9 +327,10 @@ async def export_nodule_3d(request: ExportNodule3DRequest):
 # ─── Model loading ────────────────────────────────────────────────────────────
 
 def _get_models():
+    """Load Stage 2 (Student2p5D) only. Stage 1 is not used in the sliding-window pipeline."""
     global _stage1, _stage2
     with _models_lock:
-        if _stage1 is not None and _stage2 is not None:
+        if _stage2 is not None:
             return _stage1, _stage2
         if not MODELING_PY.exists():
             raise RuntimeError("modeling.py not found — download models first")
@@ -213,9 +338,8 @@ def _get_models():
         spec = importlib.util.spec_from_file_location("pulmo_modeling", str(MODELING_PY))
         mod  = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
         sys.modules["pulmo_modeling"] = mod
-        _stage1 = mod.load_stage1(str(STAGE1_PTH), device="cpu")
         _stage2 = mod.load_stage2(str(STAGE2_PTH), device="cpu")
-        print("[MODELS] Stage 1 (HeatmapUNet3D) + Stage 2 (Student2p5D) loaded", flush=True)
+        print("[MODELS] Stage 2 (Student2p5D) loaded", flush=True)
         return _stage1, _stage2
 
 
@@ -357,10 +481,19 @@ def _build_nodule_results(findings, volume, spacing, dicom_folder, study_id):
         z, y, x  = det["location_voxel"]
         mal_prob = det["malignancy_prob"]
         risk     = "High" if mal_prob >= 0.7 else "Medium" if mal_prob >= 0.4 else "Low"
-        center_seg  = det["segmentation"]
-        center_mask = center_seg > 0.5
+        center_seg = det["segmentation"]
+        # Adaptive threshold: use 0.5 if the model is confident,
+        # otherwise fall back to 60% of the peak — ensures we always get
+        # a visible mask even for lower-confidence detections.
+        peak = float(center_seg.max())
+        seg_thresh = 0.5 if peak >= 0.5 else max(0.15, peak * 0.6)
+        center_mask = center_seg > seg_thresh
         area_px     = float(center_mask.sum())
-        size_mm     = max(3.0, 2.0 * np.sqrt(area_px / np.pi) * sy)
+        # If still empty, use every pixel above peak*0.4 as a minimal mask
+        if area_px == 0:
+            center_mask = center_seg > max(0.05, peak * 0.4)
+            area_px = float(center_mask.sum())
+        size_mm = max(3.0, 2.0 * np.sqrt(area_px / np.pi) * sy)
         if size_mm < MIN_SIZE_MM:
             continue
 
@@ -390,12 +523,18 @@ def _build_nodule_results(findings, volume, spacing, dicom_folder, study_id):
             else:
                 continue
 
-            slice_mask = seg_prob > 0.5
+            s_peak = float(seg_prob.max())
+            s_thresh = 0.5 if s_peak >= 0.5 else max(0.15, s_peak * 0.6)
+            slice_mask = seg_prob > s_thresh
+            if not slice_mask.any():
+                slice_mask = seg_prob > max(0.05, s_peak * 0.4)
             if not slice_mask.any(): continue
 
+            # Alpha: scale by segmentation confidence (min 120, max 200)
+            alpha_val = int(np.clip(120 + s_peak * 80, 120, 200))
             seg_rgba       = np.zeros((PATCH, PATCH, 4), dtype=np.uint8)
             seg_rgba[..., :3] = seg_color
-            seg_rgba[..., 3]  = np.where(slice_mask, 180, 0).astype(np.uint8)
+            seg_rgba[..., 3]  = np.where(slice_mask, alpha_val, 0).astype(np.uint8)
             Image.fromarray(seg_rgba, "RGBA").save(str(masks_dir / f"nodule_{i+1}_slice_{zi}_seg.png"))
 
             scale = float(np.sqrt(max(0.0, 1.0 - ((abs(zi-z)*st)/R_mm)**2))) if R_mm > 0 else 1.0
@@ -472,6 +611,8 @@ def ground_truth(request: GroundTruthRequest):
     for row in gt_rows:
         cx, cy, cz = float(row["coordX"]), float(row["coordY"]), float(row["coordZ"])
         diam       = float(row["diameter_mm"])
+        if diam < MIN_SIZE_MM:   # ignore sub-clinical nodules (same threshold as Pulmo)
+            continue
         malignancy = float(row["malignancy_mean"]) if row["malignancy_mean"] else 0.0
         si         = int(np.argmin([abs(z - cz) for z in z_positions]))
         half_z     = max(1, int(np.ceil(diam / (2.0 * slice_t))))

@@ -7,28 +7,19 @@
 
 ## Team Members
 
-- Can Berk Meşe — 202111045
-- Orkun Oğuztürk — 202111078
-- Barbaros Murat Dönmez — 202011019
-- Ömer Faruk Şahin — 202111073
-- Arda Kaan Bakır — 202111064
-- Ariyul İstanbul — 202011204
-- Elif Güngör — 202111077
+| Name | Student ID |
+|------|------------|
+| Can Berk Meşe | 202111045 |
+| Orkun Oğuztürk | 202111078 |
+| Barbaros Murat Dönmez | 202011019 |
+| Ömer Faruk Şahin | 202111073 |
+| Arda Kaan Bakır | 202111064 |
+| Ariyul İstanbul | 202011204 |
+| Elif Güngör | 202111077 |
 
----
+**Supervisor:** Dr. Öğr. Üyesi Doç. Dr. Ayşe Nurdan SARAN — Çankaya University, Computer Engineering
 
-## Supervisor
-
-Dr. Öğr. Üyesi Doç. Dr. Ayşe Nurdan SARAN
-Department of Computer Engineering
-Çankaya University
-
----
-
-## Course Information
-
-- CENG 407 – Software Development Project I — Fall 2025–2026
-- CENG 408 – Software Development Project II — Spring 2025–2026
+**Course:** CENG 407 (Fall 2025–2026) · CENG 408 (Spring 2025–2026)
 
 ---
 
@@ -38,105 +29,119 @@ This project presents an AI-supported medical imaging system for detecting and c
 
 The pipeline chains a 3D nodule-centre detector (Stage 1) with a 2.5D concept-bottleneck multi-task characteriser (Stage 2) that jointly predicts detection confidence, malignancy probability, eight radiological concepts, and a per-nodule segmentation mask. Because malignancy is predicted solely from the eight concepts, every decision is fully attributable to human-interpretable radiological features.
 
-The goal is to assist radiologists in early lung cancer screening and improve diagnostic confidence through a transparent, efficient, and user-friendly clinical decision support tool.
+---
+
+## Project Reports
+
+| Report | Description |
+|--------|-------------|
+| [CENG408 Final Report](docs/reports/CENG408_FinalReport.pdf) | Full project final report (CENG 408) |
+| [Final Report](docs/reports/Final_Report.pdf) | Project final report |
+| [Testing & Validation Report](docs/reports/Testing_Validation_Report.pdf) | System testing and validation results |
+| [Methodology](docs/reports/methodology.pdf) | Research methodology document |
+| [Literature Review](docs/reports/Literature_Review.docx) | Literature review (Word document) |
 
 ---
 
 ## Repository Structure
 
 ```
-UI/                     # React frontend (Vite)
-backend/                # Node.js API server + Python AI service
-ai/                     # AI & ML components
-└── Pulmo/              # Two-stage lung nodule pipeline (Git submodule)
+pulmo-app/
+├── ai/                          # AI models & ML components
+│   ├── Pulmo/                   # Two-stage pipeline (Git submodule)
+│   ├── segresnet_25d_best.pt    # SegResNet model checkpoint
+│   └── models.zip               # Additional model archive
+├── backend/                     # Node.js API + Python AI service
+│   ├── ai_service/              # FastAPI inference service (Pulmo)
+│   ├── ai_analysis.py           # SegResNet analysis pipeline
+│   └── run_analysis.py          # Analysis entry point
+├── UI/                          # React frontend (Vite)
+├── docs/                        # Project documentation
+│   ├── reports/                 # University reports (PDF/Word)
+│   ├── AUDIT_FINAL_REPORT.md
+│   ├── PIPELINE_IMPROVEMENTS_SUMMARY.md
+│   ├── PIPELINE_REVIEW.md
+│   ├── UI_Setup.md
+│   └── NLP_TRAINING.md
+├── research/                    # Research scripts, notebooks, experiments
+│   ├── notebooks/               # Jupyter notebooks (LIDC preprocessing, training)
+│   ├── scripts/                 # Audit and analysis scripts
+│   ├── figures/                 # Alignment audit visualisations
+│   ├── data/                    # CT segment mappings
+│   └── gradcam/                 # GradCAM experiments
+├── patches/                     # Git patches
+├── README.md
+├── MODEL.md                     # Model ownership & development policy
+└── start.bat                    # One-click startup (all three services)
 ```
-
-> **Note:** The `ai/Pulmo` directory is a Git submodule and must be initialised after cloning.
 
 ---
 
 ## AI Module (Pulmo)
 
-The **Pulmo** submodule contains the complete deep learning pipeline for lung nodule detection and classification, developed and versioned independently from the application layer.
+The **Pulmo** submodule contains the complete deep learning pipeline, developed and versioned independently.
 
-### Pipeline Overview
+| Resource | Link |
+|----------|------|
+| GitHub Repository | [ariyulistanbul/Pulmo](https://github.com/ariyulistanbul/Pulmo) |
+| HuggingFace Model | [ariyul/Pulmo](https://huggingface.co/ariyul/Pulmo) |
+| Location in repo | `ai/Pulmo` (Git submodule) |
+
+### Pipeline
 
 | Stage | Model | Task |
 |-------|-------|------|
-| Stage 1 | HeatmapUNet3D | Detect nodule centres in the full CT volume via a 3D sliding-window heatmap |
-| Stage 2 | Student2p5D | Per-candidate characterisation: detection, malignancy, 8 radiological concepts, segmentation |
+| Stage 1 | HeatmapUNet3D | Detect nodule centres (3D sliding-window heatmap over full CT) |
+| Stage 2 | Student2p5D | Detection · Malignancy · 8 radiological concepts · Segmentation mask |
 
-### Performance (Internal Held-Out Test Split — LUNA16)
-
-**Stage 2 — Characterisation (patch level)**
+### Performance (Internal Test — LUNA16)
 
 | Task | Metric | Score |
 |------|--------|-------|
-| Detection | AUC | 0.9981 \[95% CI 0.9961–0.9995\] |
-| Malignancy | AUC | 0.9862 \[95% CI 0.9621–1.0000\] |
-| Segmentation | Dice | 0.8573 \[95% CI 0.8447–0.8700\] |
-
-**Stage 1 — Detection (scan level, FROC)**
-
-| Metric | Value |
-|--------|-------|
-| CPM (mean sensitivity @ 1/8…8 FP/scan) | 0.629 |
-| Sensitivity @ 16 FP/scan | 0.956 |
-| Mean centre distance | 1.85 mm |
-
-> Patient-level 80/10/10 split of LUNA16. Metrics are internal; the system has not been externally validated.
-
-### Submodule Reference
-
-- **Repository:** https://github.com/ariyulistanbul/Pulmo
-- **Location:** `ai/Pulmo`
+| Stage 2 Detection | AUC | 0.9981 |
+| Stage 2 Malignancy | AUC | 0.9862 |
+| Stage 2 Segmentation | Dice | 0.8573 |
+| Stage 1 CPM | mean sensitivity | 0.629 |
+| Stage 1 Sensitivity @ 16 FP/scan | — | 0.956 |
 
 ---
 
-## Build & Run (Quick Start)
+## Documentation
 
-### Clone (First Time)
+| Document | Description |
+|----------|-------------|
+| [MODEL.md](MODEL.md) | Model ownership & development policy |
+| [docs/AUDIT_FINAL_REPORT.md](docs/AUDIT_FINAL_REPORT.md) | LIDC-IDRI alignment audit |
+| [docs/PIPELINE_IMPROVEMENTS_SUMMARY.md](docs/PIPELINE_IMPROVEMENTS_SUMMARY.md) | Pipeline improvement history |
+| [docs/PIPELINE_REVIEW.md](docs/PIPELINE_REVIEW.md) | Pipeline review notes |
+| [docs/UI_Setup.md](docs/UI_Setup.md) | UI setup instructions |
+
+---
+
+## Quick Start
+
+### Clone
 
 ```bash
-git clone --recurse-submodules https://github.com/CankayaUniversity/ceng-407-408-2025-2026-AI-Supported-Lung-Nodule-Detection-and-Classification-Using-Medical-Imaging.git
+git clone --recurse-submodules <repo-url>
 ```
 
-### If You Already Cloned the Repository
-
-```bash
-git submodule update --init --recursive
-```
-
-### Pulling Updates
-
-```bash
-git pull && git submodule update --init --recursive
-```
-
-### Running the Application
+### Start All Services
 
 ```bash
 start.bat
 ```
 
-This starts all three services:
-
 | Service | URL |
 |---------|-----|
 | Backend API | http://localhost:3001 |
-| AI Service | http://localhost:3002 |
+| AI Service (Pulmo) | http://localhost:3002 |
 | Frontend | http://localhost:5173 |
 
-For detailed UI setup instructions, see [UI_Setup.md](UI_Setup.md).
+### First Run: Download Pulmo Model
+
+Open http://localhost:5173/new-study → click **Download Pulmo** in the AI Analysis section.
 
 ---
 
-## Disclaimer
-
-This project is developed for academic and research purposes only and is not intended for clinical diagnosis or medical use.
-
----
-
-## License
-
-See individual module licenses for details.
+> **Disclaimer:** This project is for academic and research purposes only. Not intended for clinical diagnosis or medical use.

@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
@@ -83,6 +83,13 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const PYTHON_EXECUTABLE = process.env.PYTHON_EXECUTABLE || 'python';
+
+const SEGMENTATION_MODELS = {
+  best: { label: 'Best SegResNet', file: 'segresnet_25d_best_.pt' },
+  adam: { label: 'Adam 25D',       file: 'segresnet_25d_adam.pt'  },
+};
+// Models are in ai/models/
+const MODELS_DIR = path.join(__dirname, '..', 'ai', 'models');
 
 // Middleware
 app.use(cors({
@@ -399,17 +406,6 @@ app.post('/api/seed-dicoms', async (req, res) => {
   }
 });
 
-const SEGMENTATION_MODELS = {
-  best: {
-    label: 'Best SegResNet',
-    file: 'segresnet_25d_best_.pt'
-  },
-  adam: {
-    label: 'Adam 25D',
-    file: 'segresnet_25d_adam.pt'
-  }
-};
-
 app.post('/api/nlp/analyze-note', async (req, res) => {
   try {
     const analysis = await runPythonJsonScript('nlp_analysis.py', req.body || {});
@@ -457,7 +453,7 @@ app.post('/api/analyze-dicom/:studyId', async (req, res) => {
     
     // Prepare paths
     const studyDir = path.join(__dirname, 'uploads', studyId);
-    const modelPath = path.join(__dirname, 'models', selectedModel.file);
+    const modelPath = path.join(MODELS_DIR, selectedModel.file);
     const overlaysDir = path.join(__dirname, 'uploads', studyId, 'overlays');
     
     // Check model exists

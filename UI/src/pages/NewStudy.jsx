@@ -27,6 +27,7 @@ function NewStudy() {
   // AI model state
   const [modelStatus, setModelStatus] = useState('unknown'); // 'unknown'|'not_downloaded'|'downloading'|'ready'
   const modelPollRef = useRef(null);
+  const [analysisModel, setAnalysisModel] = useState('pulmo'); // 'pulmo'|'best'|'adam'
 
   // Check model status on mount and poll during download
   useEffect(() => {
@@ -245,12 +246,14 @@ function NewStudy() {
         return null;
       }
 
-      // DICOM files are optional but recommended
+      // SegResNet requires DICOM files; Pulmo allows skipping with confirmation
       if (dicomFiles.length === 0) {
-        const proceed = confirm('No DICOM files selected. Continue without images?\n\nNote: You will not be able to view images in the Review page.');
-        if (!proceed) {
+        if (analysisModel === 'best' || analysisModel === 'adam') {
+          alert('No DICOM files selected. Please upload DICOM files before starting SegResNet analysis.');
           return null;
         }
+        const proceed = confirm('No DICOM files selected. Continue without images?\n\nNote: You will not be able to view images in the Review page.');
+        if (!proceed) return null;
       }
 
       // Create patient
@@ -318,15 +321,26 @@ function NewStudy() {
       }
       setProgress(40);
 
-      if (modelStatus === 'ready' && dicomFiles.length > 0) {
-        // Real AI analysis
+      if (analysisModel === 'pulmo' && modelStatus === 'ready' && dicomFiles.length > 0) {
+        // Pulmo (HuggingFace Student2p5D) analysis via AI service
         setProgress(50);
-        console.log('Starting real Pulmo analysis...');
+        console.log('Starting Pulmo analysis...');
         await aiAPI.analyzeStudy(newStudyId);
+        setProgress(100);
+      } else if ((analysisModel === 'best' || analysisModel === 'adam') && dicomFiles.length > 0) {
+        // SegResNet analysis via spawn
+        setProgress(50);
+        console.log(`Starting SegResNet analysis (${analysisModel})...`);
+        const res = await fetch(`http://localhost:3001/api/analyze-dicom/${newStudyId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ top_k: 3, modelKey: analysisModel })
+        });
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'SegResNet analysis failed'); }
         setProgress(100);
       } else {
         // Fallback: mock analysis
-        console.log('Using mock analysis (Pulmo not available)');
+        console.log('Using mock analysis');
         await new Promise(resolve => setTimeout(resolve, 1000));
         setProgress(70);
         await new Promise(resolve => setTimeout(resolve, 800));
@@ -522,19 +536,44 @@ function NewStudy() {
               )}
             </div>
 
+            <div className="analysis-model-field">
+              <label htmlFor="analysis-model">Analysis Model</label>
+              <select
+                id="analysis-model"
+                value={analysisModel}
+                onChange={e => setAnalysisModel(e.target.value)}
+                className="new-study-input analysis-model-select"
+                disabled={isProcessing}
+              >
+                <option value="pulmo">Pulmo</option>
+                <option value="best">Best SegResNet (Local)</option>
+                <option value="adam">Adam 25D SegResNet (Local)</option>
+              </select>
+            </div>
+
             <div className="analysis-controls">
               <button
                 className="start-analysis-btn"
                 onClick={startAnalysis}
-                disabled={isProcessing || (!formData.patientID || !formData.nameSurname)}
+                disabled={
+                  isProcessing ||
+                  (!formData.patientID || !formData.nameSurname) ||
+                  (analysisModel === 'pulmo' && modelStatus !== 'ready')
+                }
               >
-                {isProcessing ? (
+                {isProcessing && progress < 100 ? (
                   <>
                     <span className="spinner"></span>
                     Processing... ({progress}%)
                   </>
-                ) : modelStatus === 'ready' ? (
+                ) : isProcessing && progress >= 100 ? (
+                  <>Analysis Complete</>
+                ) : analysisModel === 'pulmo' && modelStatus === 'ready' ? (
                   <>Start AI Analysis (Pulmo)</>
+                ) : analysisModel === 'best' ? (
+                  <>Start AI Analysis (Best SegResNet)</>
+                ) : analysisModel === 'adam' ? (
+                  <>Start AI Analysis (Adam 25D)</>
                 ) : (
                   <>Start AI Analysis</>
                 )}
@@ -542,6 +581,15 @@ function NewStudy() {
 
               {(!formData.patientID || !formData.nameSurname) && !isProcessing && (
                 <p className="analysis-hint">Fill in Patient ID and Name to start analysis</p>
+              )}
+              {analysisModel === 'pulmo' && modelStatus === 'not_downloaded' && !isProcessing && (
+                <p className="analysis-hint">Download Pulmo model above to start analysis</p>
+              )}
+              {analysisModel === 'pulmo' && modelStatus === 'downloading' && !isProcessing && (
+                <p className="analysis-hint">Waiting for Pulmo download to complete...</p>
+              )}
+              {analysisModel === 'pulmo' && modelStatus === 'service_offline' && !isProcessing && (
+                <p className="analysis-hint">AI service offline — start it via start.bat</p>
               )}
             </div>
 

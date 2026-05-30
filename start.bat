@@ -18,6 +18,9 @@ start "Backend" cmd /k "cd backend && node server.js"
 
 timeout /t 2 /nobreak > nul
 
+echo Installing backend Python dependencies...
+pip install -r backend\requirements.txt -q
+
 echo Starting Pulmo AI Service...
 start "AI Service" cmd /k "cd backend\ai_service && pip install -r requirements.txt -q && python main.py"
 

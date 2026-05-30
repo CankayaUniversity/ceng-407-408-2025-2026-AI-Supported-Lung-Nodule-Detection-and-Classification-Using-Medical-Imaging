@@ -47,6 +47,80 @@ const CONCEPT_LABELS = {
   texture: 'Texture',
 };
 
+// ── Segresnet candidate utility helpers ──────────────────────────────────────
+
+const getValidSliceIndex = (nodule, dicomFileCount = Number.POSITIVE_INFINITY) => {
+  const candidates = [
+    nodule?.sliceIndex,
+    nodule?.slice_index,
+    nodule?.coordinates?.sliceIndex,
+    nodule?.coordinates?.displaySliceIndex,
+    Number.isFinite(Number(nodule?.coordinates?.sliceNumber)) ? Number(nodule.coordinates.sliceNumber) - 1 : null,
+    nodule?.coordinates?.modelSliceIndex,
+  ];
+  for (const c of candidates) {
+    const n = Number(c);
+    if (Number.isInteger(n) && n >= 0 && n < dicomFileCount) return n;
+  }
+  return 0;
+};
+
+const clampPercent = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(100, v * 100)) : 0);
+
+const getSegmentationProbability = (n) => {
+  const sp = Number(n?.coordinates?.segmentationProbability);
+  return Number.isFinite(sp) ? sp : Number.isFinite(Number(n?.probability)) ? Number(n.probability) : 0;
+};
+
+const getClassifierProbability = (n) => {
+  const cp = Number(n?.coordinates?.classificationProbability);
+  return Number.isFinite(cp) ? cp : null;
+};
+
+const getCandidateRisk = (n) => {
+  const cp = getClassifierProbability(n);
+  if (cp === null) return (n?.risk || 'medium').toLowerCase();
+  const avg = (getSegmentationProbability(n) + cp) / 2;
+  if (cp < 0.4) return 'low';
+  if (avg >= 0.7) return 'high';
+  return 'medium';
+};
+
+const getCandidateLikelihood = (n) => {
+  const cp = getClassifierProbability(n);
+  return cp !== null ? clampPercent(cp) : clampPercent(getSegmentationProbability(n));
+};
+
+const toBackendAssetUrl = (url) => {
+  if (!url) return null;
+  return url.startsWith('http') ? url : `http://localhost:3001${url}`;
+};
+
+const getCandidateHeaderText = (count) => {
+  if (count === 0) return 'No AI candidates';
+  if (count === 1) return '1 AI candidate';
+  return `${count} AI candidates`;
+};
+
+const getClassificationLabel = (candidate) => {
+  const label = candidate?.coordinates?.classificationLabel;
+  if (label) return label;
+  return getCandidateLikelihood(candidate) >= 50
+    ? 'Positive nodule candidate'
+    : 'Negative / likely false positive';
+};
+
+const getCandidateSortScore = (candidate) => {
+  const cp = Number(candidate?.coordinates?.classificationProbability);
+  if (Number.isFinite(cp)) return cp;
+  const ms = Number(candidate?.coordinates?.score);
+  if (Number.isFinite(ms)) return ms;
+  const p = Number(candidate?.probability);
+  return Number.isFinite(p) ? p : 0;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const buildXaiExplanations = (nodule) => {
   if (nodule.conceptScores && Object.keys(nodule.conceptScores).length > 0) {
     return Object.entries(nodule.conceptScores)
@@ -133,6 +207,10 @@ export default function Review(){
   const [gtNodules, setGtNodules] = useState([]);
   const [gtSpacing, setGtSpacing] = useState({ sliceThickness: 1.0, pixelSpacing: 0.664 });
   const [showGT, setShowGT] = useState(false);
+  // Segresnet overlay states (full-slice overlay from run_analysis.py)
+  const [markerPositions, setMarkerPositions] = useState({});
+  const [segmentationOverlay, setSegmentationOverlay] = useState(null);
+  const [heatmapOverlay, setHeatmapOverlay] = useState(null);
   
   // Report state
   const [showReportModal, setShowReportModal] = useState(false);
@@ -713,8 +791,12 @@ export default function Review(){
               detectionProb: n.detection_prob || 0,
             };
             noduleObj.xaiExplanations = buildXaiExplanations(noduleObj);
+            // Apply segresnet-style risk override when classifier prob available
+            noduleObj.risk = getCandidateRisk(noduleObj);
             return noduleObj;
-          });
+          })
+          .sort((a, b) => getCandidateSortScore(b) - getCandidateSortScore(a))
+          .map((n, i) => ({ ...n, displayRank: i + 1 }));
         } else {
           // Mock nodules (no AI analysis yet)
           const noduleCount = studyData.nodule_count || 0;
@@ -1174,49 +1256,68 @@ export default function Review(){
                 />
                 {imageLoading && <div className="image-loading-overlay"><div className="loading-spinner small"></div></div>}
                 
-                {/* SEG: segmentation mask only — no circle markers */}
-                {showSegmentation && nodules.map((nodule) => {
-                  // Filter: skip if model said "not a nodule"
-                  if (nodule.detectionProb > 0 && nodule.detectionProb <= 0.5) return null;
-                  const allSlices = nodule.allSliceIndices?.length > 0
-                    ? nodule.allSliceIndices : [nodule.sliceIndex];
-                  if (!allSlices.includes(currentImageIndex)) return null;
-
-                  const segPath = nodule.maskPaths?.[`${currentImageIndex}_seg`]
-                    ?? nodule.maskPaths?.[String(currentImageIndex)]; // legacy fallback
-                  const patchStyle = getPatchStyle(nodule);
-                  if (!segPath || !patchStyle) return null;
-
-                  return (
-                    <img
-                      key={`seg-${nodule.id}-${currentImageIndex}`}
-                      src={`http://localhost:3001/uploads/${studyId}/${segPath}`}
-                      style={{ ...patchStyle, objectFit: 'fill' }}
-                      alt=""
-                      draggable={false}
-                    />
-                  );
-                })}
-
-                {/* HEAT: concept-weighted XAI heatmap */}
-                {showHeatmap && (() => {
-                  const hasRealMasks = nodules.some(
-                    n => Object.keys(n.maskPaths || {}).some(k => k.endsWith('_heat'))
-                  );
-                  if (!hasRealMasks) {
-                    return <div className="heatmap-overlay"><div className="heatmap-gradient" /></div>;
+                {/* SEG overlay — SegResNet full-slice OR Pulmo 64×64 patch */}
+                {showSegmentation && (() => {
+                  // SegResNet: full-slice overlay image stored in segmentationOverlay state
+                  if (segmentationOverlay) {
+                    return (
+                      <img
+                        key="seg-overlay-segresnet"
+                        className="segmentation-overlay-image"
+                        src={segmentationOverlay.src}
+                        style={{ position: 'absolute', objectFit: 'fill', opacity: 0.65, ...segmentationOverlay.style }}
+                        onError={() => setSegmentationOverlay(null)}
+                        alt=""
+                        draggable={false}
+                      />
+                    );
                   }
+                  // Pulmo: 64×64 patch mask per nodule
                   return nodules.map((nodule) => {
                     if (nodule.detectionProb > 0 && nodule.detectionProb <= 0.5) return null;
-                    const allSlices = nodule.allSliceIndices?.length > 0
-                      ? nodule.allSliceIndices : [nodule.sliceIndex];
+                    const allSlices = nodule.allSliceIndices?.length > 0 ? nodule.allSliceIndices : [nodule.sliceIndex];
                     if (!allSlices.includes(currentImageIndex)) return null;
-
-                    const heatPath = nodule.maskPaths?.[`${currentImageIndex}_heat`];
-                    if (!heatPath) return null;
+                    const segPath = nodule.maskPaths?.[`${currentImageIndex}_seg`] ?? nodule.maskPaths?.[String(currentImageIndex)];
                     const patchStyle = getPatchStyle(nodule);
-                    if (!patchStyle) return null;
+                    if (!segPath || !patchStyle) return null;
+                    return (
+                      <img
+                        key={`seg-${nodule.id}-${currentImageIndex}`}
+                        src={`http://localhost:3001/uploads/${studyId}/${segPath}`}
+                        style={{ ...patchStyle, objectFit: 'fill' }}
+                        alt=""
+                        draggable={false}
+                      />
+                    );
+                  });
+                })()}
 
+                {/* HEAT overlay — SegResNet GradCAM OR Pulmo concept heatmap */}
+                {showHeatmap && (() => {
+                  // SegResNet: full-slice heatmap
+                  if (heatmapOverlay) {
+                    return (
+                      <img
+                        key="heat-overlay-segresnet"
+                        className="heatmap-overlay-image"
+                        src={heatmapOverlay.src}
+                        style={{ position: 'absolute', objectFit: 'fill', opacity: 0.7, ...heatmapOverlay.style }}
+                        onError={() => setHeatmapOverlay(null)}
+                        alt=""
+                        draggable={false}
+                      />
+                    );
+                  }
+                  // Pulmo: concept-weighted XAI heatmap
+                  const hasRealHeat = nodules.some(n => Object.keys(n.maskPaths || {}).some(k => k.endsWith('_heat')));
+                  if (!hasRealHeat) return <div className="heatmap-overlay"><div className="heatmap-gradient" /></div>;
+                  return nodules.map((nodule) => {
+                    if (nodule.detectionProb > 0 && nodule.detectionProb <= 0.5) return null;
+                    const allSlices = nodule.allSliceIndices?.length > 0 ? nodule.allSliceIndices : [nodule.sliceIndex];
+                    if (!allSlices.includes(currentImageIndex)) return null;
+                    const heatPath = nodule.maskPaths?.[`${currentImageIndex}_heat`];
+                    const patchStyle = getPatchStyle(nodule);
+                    if (!heatPath || !patchStyle) return null;
                     return (
                       <img
                         key={`heat-${nodule.id}-${currentImageIndex}`}
@@ -1295,7 +1396,12 @@ export default function Review(){
 
         {/* Right Panel - Nodules */}
         <div className="review-right-panel">
-              <div className="panel-header"><h3>Nodules ({nodules.length})</h3></div>
+              <div className="panel-header">
+                <h3>AI Candidates ({nodules.length})</h3>
+                {nodules.length > 0
+                  ? <p className="panel-subtitle">Showing classifier-ranked review candidates</p>
+                  : <p className="panel-subtitle">No clinically significant AI candidate was selected for review</p>}
+              </div>
               {showGT && gtNodules.length > 0 && (
                 <div className="gt-comparison-panel">
                   <div className="gt-comparison-header">
@@ -1350,8 +1456,8 @@ export default function Review(){
                   <div key={nodule.id} className={`nodule-item ${selectedNodule === i ? 'selected' : ''} ${nodule.reviewed ? 'reviewed' : ''}`}
                     onClick={() => goToNoduleSlice(nodule, i)}>
                     <div className="nodule-item-header">
-                      <span className="nodule-number">#{nodule.nodule_number}</span>
-                      <span className={`risk-badge ${nodule.risk}`}>{nodule.risk.toUpperCase()}</span>
+                      <span className="nodule-number">#{nodule.displayRank || nodule.nodule_number || i + 1}</span>
+                      <span className={`risk-badge ${nodule.risk}`}>{getCandidateLikelihood(nodule).toFixed(0)}%</span>
                     </div>
                     <div className="nodule-item-info">
                       <span>Slice {getValidSliceIndex(nodule, dicomFiles.length) + 1} - {nodule.size} mm eq. dia.</span>
@@ -1375,8 +1481,8 @@ export default function Review(){
               {nodules.length > 0 && currentNodule && (
                 <div className="nodule-details">
                   <div className="details-header">
-                    <h4>Nodule #{currentNodule.nodule_number}</h4>
-                    <span className={`risk-indicator ${currentNodule.risk}`}>{currentNodule.risk.toUpperCase()}</span>
+                    <h4>AI Candidate #{currentNodule.displayRank || currentNodule.nodule_number}</h4>
+                    <span className={`risk-indicator ${currentNodule.risk}`}>{getCandidateLikelihood(currentNodule).toFixed(0)}%</span>
                   </div>
 
                   <div className="details-content">
@@ -1398,8 +1504,8 @@ export default function Review(){
                     <div className="detail-section">
                       <label>Nodule Likelihood</label>
                       <div className="probability-display">
-                        <div className="probability-bar"><div className={`probability-fill ${currentNodule.risk}`} style={{ width: `${getCandidateLikelihood(currentNodule, nodules)}%` }} /></div>
-                        <span>{getCandidateLikelihood(currentNodule, nodules).toFixed(0)}%</span>
+                        <div className="probability-bar"><div className={`probability-fill ${currentNodule.risk}`} style={{ width: `${getCandidateLikelihood(currentNodule)}%` }} /></div>
+                        <span>{getCandidateLikelihood(currentNodule).toFixed(0)}%</span>
                       </div>
                       <div className="classification-result">
                         <span>Segmentation probability: {getSegmentationProbability(currentNodule).toFixed(3)}</span>
@@ -1422,21 +1528,7 @@ export default function Review(){
                           </div>
                         ))}
                       </div>
-                    )}
-
-                    {currentNodule.xaiExplanations?.length > 0 && (
-                      <div className="detail-section xai-section">
-                        <label>XAI Explanation</label>
-                        <div className="xai-features">
-                          {currentNodule.xaiExplanations.map((exp, i) => (
-                            <div key={i} className="xai-feature">
-                              <span>{exp.feature}</span>
-                              <div className="confidence-bar"><div style={{ width: `${exp.confidence * 100}%` }} /><span>{(exp.confidence * 100).toFixed(0)}%</span></div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    </div>
 
                     {currentNodule.centerVoxel && (
                       <div className="detail-section">
@@ -1446,6 +1538,22 @@ export default function Review(){
                         >
                           3D View
                         </button>
+                      </div>
+                    )}
+
+                    {/* SegResNet Classifier GradCAM explanation */}
+                    {(currentNodule.coordinates?.classifierPanelsUrl || currentNodule.coordinates?.classifierGradcamUrl) && (
+                      <div className="detail-section classifier-explanation-section">
+                        <label>Classifier Explanation (GradCAM)</label>
+                        <img
+                          className="classifier-panels-image"
+                          src={toBackendAssetUrl(currentNodule.coordinates.classifierPanelsUrl || currentNodule.coordinates.classifierGradcamUrl)}
+                          alt="Classifier GradCAM explanation"
+                          style={{ width: '100%', borderRadius: '4px', marginTop: '6px' }}
+                        />
+                        <p style={{ fontSize: '10px', color: '#666', marginTop: '4px' }}>
+                          Research/demo only — not for clinical diagnosis.
+                        </p>
                       </div>
                     )}
 
@@ -1529,12 +1637,17 @@ export default function Review(){
                 <div className="summary-row"><span>Reviewed:</span><span>{nodules.filter(n => n.reviewed).length}/{nodules.length}</span></div>
               </div>
               <div className="nodules-preview">
-                <h4>Nodules to Include</h4>
-                {nodules.filter(n => n.includeInReport).map(nodule => (
+                <h4>AI Candidates to Include</h4>
+                {nodules.filter(n => n.includeInReport).length > 0 ? nodules.filter(n => n.includeInReport).map(nodule => (
                   <div key={nodule.id} className="nodule-preview-item">
-                    <span>#{nodule.nodule_number} - {nodule.location}</span><span>{nodule.size}mm</span>
+                    <span>#{nodule.displayRank || nodule.nodule_number} - {nodule.location}</span>
+                    <span>{getCandidateLikelihood(nodule).toFixed(0)}%</span>
                     <span className={`risk-tag ${nodule.risk}`}>{nodule.risk}</span>
                     {nodule.doctorAssessment && <span className={`assessment-tag ${nodule.doctorAssessment}`}>{nodule.doctorAssessment}</span>}
+                  </div>
+                )) : (
+                  <div className="empty-report-state" style={{ color: '#666', fontSize: '13px', padding: '8px 0' }}>
+                    No AI candidate is currently included in the report.
                   </div>
                 )}
               </div>

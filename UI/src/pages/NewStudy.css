@@ -259,6 +259,23 @@
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
+.analysis-model-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.analysis-model-field label {
+  font-size: 13px;
+  color: var(--color-text-secondary, rgba(255,255,255,0.6));
+  font-weight: 500;
+}
+
+.analysis-model-select {
+  width: 100%;
+}
+
 .download-pulmo-btn {
   padding: 7px 16px;
   background: linear-gradient(135deg, #7c3aed, #5b21b6);
