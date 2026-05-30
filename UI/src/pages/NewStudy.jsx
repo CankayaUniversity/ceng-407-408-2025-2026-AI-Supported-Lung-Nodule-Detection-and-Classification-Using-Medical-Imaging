@@ -282,7 +282,8 @@ function NewStudy() {
         study_id: newStudyId,
         patient_id: formData.patientID,
         study_date: new Date().toISOString().split('T')[0],
-        description: formData.clinicalNote || 'CT Chest Study'
+        description: 'CT Chest Study',
+        clinical_note: formData.clinicalNote || null
       };
 
       console.log('Creating study:', studyData);
@@ -339,6 +340,7 @@ function NewStudy() {
       alert('Failed to process study: ' + (error.response?.data?.error || error.message));
       setIsProcessing(false);
       setProgress(0);
+      return;
     }
   };
 

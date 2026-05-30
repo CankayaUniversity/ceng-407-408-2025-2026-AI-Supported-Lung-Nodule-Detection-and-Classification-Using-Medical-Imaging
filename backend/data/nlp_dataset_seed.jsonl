@@ -1,0 +1,73 @@
+{"text":"30 paket/yıl sigara öyküsü mevcut, halen içiyor. KOAH nedeniyle inhaler tedavi kullanıyor.","positive_labels":["smoking_history","copd"]}
+{"text":"40 py sigara, son 2 yıldır bırakmış. Amfizem ve kronik obstrüktif akciğer hastalığı öyküsü var.","positive_labels":["smoking_history","copd"]}
+{"text":"Aktif içici, günde 1 paket. Son haftalarda dispne tarifliyor.","positive_labels":["smoking_history","systemic_symptoms"]}
+{"text":"62 yaş erkek; babada akciğer ca öyküsü mevcut.","positive_labels":["family_history","age_gender_risk"]}
+{"text":"1. derece akrabada akciğer kanseri öyküsü bulunuyor, erkek hasta 67 yaşında.","positive_labels":["family_history","age_gender_risk"]}
+{"text":"Ailede malignite yok, sigara öyküsü yok, risk faktörü saptanmadı.","positive_labels":[]}
+{"text":"Geçmişte meme kanseri nedeniyle opere edilmiş, son aylarda hemoptizi ve kilo kaybı tarifliyor.","positive_labels":["prior_cancer_history","systemic_symptoms"]}
+{"text":"Eski kolon kanseri öyküsü mevcut. Son 3 aydır istemsiz kilo kaybı ve gece terlemesi bildiriyor.","positive_labels":["prior_cancer_history","systemic_symptoms"]}
+{"text":"Malignite öyküsü yok. Hemoptizi veya kilo kaybı tanımlamıyor.","positive_labels":[]}
+{"text":"Morbid obez hasta, BMI 36.4 olarak kaydedildi.","positive_labels":["obesity_metabolic"]}
+{"text":"Obezite mevcut, beden kitle indeksi 33 kg/m2 ölçüldü.","positive_labels":["obesity_metabolic"]}
+{"text":"BMI normal sınırlarda, obezite ya da metabolik risk faktörü tariflenmiyor.","positive_labels":[]}
+{"text":"Tüberküloz sekeli ve bronşektazi zemininde gelişen nodül değerlendiriliyor.","positive_labels":["infection_history","copd"]}
+{"text":"Eski TB sekeli, interstisyel fibrozis ve skar alanları mevcut.","positive_labels":["infection_history","copd"]}
+{"text":"Geçirilmiş tüberküloz ve kronik inflamasyon öyküsü bildiriliyor.","positive_labels":["infection_history"]}
+{"text":"Tekrarlayan akciğer enfeksiyonları sonrası fibrotik değişiklikler izlenmiş.","positive_labels":["infection_history","copd"]}
+{"text":"Verem öyküsü yok, kronik enfeksiyon bulgusu tariflenmiyor.","positive_labels":[]}
+{"text":"Pasif sigara maruziyeti ve yoğun hava kirliliği öyküsü olan hasta tarama amaçlı başvurdu.","positive_labels":["environmental_exposure"]}
+{"text":"Radon maruziyeti olan bölgede yaşamış, iç ortam dumanına da maruz kalmış.","positive_labels":["environmental_exposure"]}
+{"text":"Biyokütle dumanı ve odun sobası maruziyeti uzun yıllardır devam etmiş.","positive_labels":["environmental_exposure"]}
+{"text":"Çevresel duman maruziyeti yok, pasif içicilik öyküsü alınmadı.","positive_labels":[]}
+{"text":"Kömür madeninde çalışan hastada silikozis öyküsü mevcut.","positive_labels":["occupational_exposure_lung_disease"]}
+{"text":"Asbest ve krom maruziyeti olan tersane çalışanında akciğer nodülü saptandı.","positive_labels":["occupational_exposure_lung_disease"]}
+{"text":"Kömür işçisi pnömokonyozu ve silika maruziyeti öyküsü mevcuttur.","positive_labels":["occupational_exposure_lung_disease"]}
+{"text":"Arsenik, nikel ve silika maruziyeti olan döküm işçisi kontrol için başvurdu.","positive_labels":["occupational_exposure_lung_disease"]}
+{"text":"Beryllium, kadmiyum ve vinil klorid maruziyeti olan işçide akciğer taraması planlandı.","positive_labels":["occupational_exposure_lung_disease"]}
+{"text":"Asbestozis ve interstisyel fibrozis birlikte izlenmektedir.","positive_labels":["occupational_exposure_lung_disease","copd"]}
+{"text":"Mesleki maruziyet öyküsü yok, maden veya tersane çalışma öyküsü alınmadı.","positive_labels":[]}
+{"text":"İleri yaş erkek hastada amfizem ve uzun süreli sigara kullanımı öyküsü vardır.","positive_labels":["age_gender_risk","copd","smoking_history"]}
+{"text":"67 yaş erkek hastada radon maruziyeti ve KOAH öyküsü vardır.","positive_labels":["age_gender_risk","environmental_exposure","copd"]}
+{"text":"Postmenopoz dönemdeki kadın hastada pasif içicilik öyküsü mevcut.","positive_labels":["age_gender_risk","environmental_exposure"]}
+{"text":"68 yaş erkek hasta, 45 py sigara ve amfizem öyküsü ile başvurdu.","positive_labels":["age_gender_risk","smoking_history","copd"]}
+{"text":"35 yaş kadın; ek risk faktörü, çevresel maruziyet veya aile öyküsü tariflemiyor.","positive_labels":[]}
+{"text":"Akciğerde skar dokusu, amfizem ve KOAH öyküsü bulunan hastada nodül izlendi.","positive_labels":["copd"]}
+{"text":"KOAH, bronşektazi ve hava yolu obstrüksiyonu nedeniyle takipte.","positive_labels":["copd"]}
+{"text":"İnterstisyel fibrozis zemininde sağ üst lobda nodül izlenmiş.","positive_labels":["copd"]}
+{"text":"Emphysema/COPD mevcut, inhaler kullanım öyküsü var.","positive_labels":["copd"]}
+{"text":"Pulmoner fibrozis ve apikal skar değişiklikleri tarifleniyor.","positive_labels":["copd"]}
+{"text":"KOAH öyküsü yok, hava yolu obstrüksiyonu düşündüren veri yok.","positive_labels":[]}
+{"text":"Babasında akciğer kanseri bulunan hastada genetik yatkınlık düşünülmektedir.","positive_labels":["family_history"]}
+{"text":"Anne ve amcada akciğer ca öyküsü mevcut.","positive_labels":["family_history"]}
+{"text":"Ailede akciğer kanseri öyküsü ve morbid obezite birlikte mevcuttur.","positive_labels":["family_history","obesity_metabolic"]}
+{"text":"Aile öyküsü negatif, herediter risk düşündüren veri yok.","positive_labels":[]}
+{"text":"Geçmişte malign melanom öyküsü bulunan hastada dispne yakınması vardır.","positive_labels":["prior_cancer_history","systemic_symptoms"]}
+{"text":"Önceki kolon kanseri öyküsü olan obez hasta kontrol amaçlı değerlendirildi.","positive_labels":["prior_cancer_history","obesity_metabolic"]}
+{"text":"Meme ca öyküsü nedeniyle kemoterapi almış, şu an toraks BT kontrolünde.","positive_labels":["prior_cancer_history"]}
+{"text":"Önceki malignite öyküsü yok, onkolojik tedavi almamış.","positive_labels":[]}
+{"text":"Gece terlemesi, nefes darlığı ve istemsiz kilo kaybı ile başvurdu.","positive_labels":["systemic_symptoms"]}
+{"text":"Hemoptizi, dispne ve son dönemde belirgin kilo kaybı tarifliyor.","positive_labels":["systemic_symptoms"]}
+{"text":"Kilo kaybı, gece terlemesi ve halsizlik yakınmaları mevcut.","positive_labels":["systemic_symptoms"]}
+{"text":"Hemoptizi yok, kilo kaybı yok, gece terlemesi yok.","positive_labels":[]}
+{"text":"Hasta radon maruziyeti olan bir bölgede yaşamış, ayrıca biyokütle dumanına maruz kalmıştır.","positive_labels":["environmental_exposure"]}
+{"text":"Pasif sigara dumanı ve hava kirliliği maruziyeti olan postmenopoz kadın hasta değerlendirildi.","positive_labels":["environmental_exposure","age_gender_risk"]}
+{"text":"Odun dumanı ve biomass maruziyeti uzun yıllardır devam etmektedir.","positive_labels":["environmental_exposure"]}
+{"text":"İkinci el sigara dumanı maruziyeti belirgin.","positive_labels":["environmental_exposure"]}
+{"text":"Akciğer enfeksiyonları sonrası kronik inflamasyon ve verem öyküsü olan hastada fibrotik alanlar izlendi.","positive_labels":["infection_history","copd"]}
+{"text":"Tüberküloz sekeli, hemoptizi ve kilo kaybı ile başvuran hastada nodül izlendi.","positive_labels":["infection_history","systemic_symptoms"]}
+{"text":"Kronik enfeksiyon öyküsü ve bronşektazi nedeniyle yakın takip önerildi.","positive_labels":["infection_history","copd"]}
+{"text":"Enfeksiyon öyküsü yok, TB sekeli izlenmiyor.","positive_labels":[]}
+{"text":"Uzun süreli sigara kullanımı olan erkek hasta 68 yaşında olup KOAH ile izlenmektedir.","positive_labels":["smoking_history","age_gender_risk","copd"]}
+{"text":"35 py sigara öyküsü, son 5 yıldır bırakmış. Aile öyküsü negatif.","positive_labels":["smoking_history"]}
+{"text":"Sigarayı 20 yıl önce bırakmış, toplam 25 paket/yıl içim var.","positive_labels":["smoking_history"]}
+{"text":"Aktif içici değil, hayat boyu toplam içim 1 paket/yılın altında.","positive_labels":[]}
+{"text":"65 yaş erkek, sigara yok ancak ailede akciğer kanseri ve radon maruziyeti var.","positive_labels":["age_gender_risk","family_history","environmental_exposure"]}
+{"text":"Erkek hasta 70 yaşında; kömür madeni işçiliği, silikozis, KOAH ve 50 py sigara öyküsü mevcut.","positive_labels":["age_gender_risk","occupational_exposure_lung_disease","copd","smoking_history"]}
+{"text":"Postmenopoz kadın; pasif içicilik, obezite ve ailede akciğer kanseri öyküsü bildiriyor.","positive_labels":["age_gender_risk","environmental_exposure","obesity_metabolic","family_history"]}
+{"text":"Önceki lenfoma öyküsü bulunan hastada gece terlemesi ve kilo kaybı mevcut.","positive_labels":["prior_cancer_history","systemic_symptoms"]}
+{"text":"Asbest maruziyeti olan hastada interstisyel fibrozis ve dispne mevcut.","positive_labels":["occupational_exposure_lung_disease","copd","systemic_symptoms"]}
+{"text":"Maden işçisi değil, mesleki karsinojen maruziyeti yok. Sigara ve aile öyküsü de negatif.","positive_labels":[]}
+{"text":"KOAH ve sigara öyküsü var, ancak hemoptizi ya da kilo kaybı yok.","positive_labels":["copd","smoking_history"]}
+{"text":"Verem sekeli, radon maruziyeti ve ailede akciğer kanseri öyküsü birlikte mevcut.","positive_labels":["infection_history","environmental_exposure","family_history"]}
+{"text":"İleri yaş erkek hastada obezite, KOAH ve önceki malignite öyküsü mevcut.","positive_labels":["age_gender_risk","obesity_metabolic","copd","prior_cancer_history"]}
+{"text":"Klinik notta belirgin risk faktörü yok; sigara, aile öyküsü, enfeksiyon ve mesleki maruziyet reddediliyor.","positive_labels":[]}

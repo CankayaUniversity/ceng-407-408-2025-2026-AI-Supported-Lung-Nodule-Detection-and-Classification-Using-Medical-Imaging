@@ -290,6 +290,25 @@
   gap: 12px;
 }
 
+.analysis-model-field {
+  width: min(320px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.analysis-model-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.analysis-model-select {
+  width: 100%;
+}
+
 .start-analysis-btn {
   padding: 14px 32px;
   background: linear-gradient(135deg, var(--color-accent), #2563eb);

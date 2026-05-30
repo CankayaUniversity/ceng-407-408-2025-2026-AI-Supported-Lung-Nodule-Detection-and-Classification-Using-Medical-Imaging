@@ -1,0 +1,55 @@
+from pathlib import Path
+import pandas as pd
+
+root = Path("C:/LIDC_DATA/manifest-1773770928394/LIDC-IDRI")
+print("LIDC root exists:", root.exists())
+
+# Check if metadata exists
+meta_path = root / "metadata.csv"
+print("metadata.csv exists:", meta_path.exists())
+
+if meta_path.exists():
+    df = pd.read_csv(meta_path)
+    print("metadata rows:", len(df))
+    print("columns:", list(df.columns))
+else:
+    print("metadata.csv not found at", meta_path)
+
+patients = sorted([p.name for p in root.iterdir() if p.is_dir() and p.name.startswith("LIDC-IDRI-")])
+print("patient count on disk:", len(patients))
+print("first 10 patients:", patients[:10])
+
+for pid in patients[:10]:
+    pdir = root / pid
+    studies = [x for x in pdir.iterdir() if x.is_dir()]
+    print(f"\n{pid}")
+    print(" study folders:", len(studies))
+    for s in studies[:3]:
+        series = [x.name for x in s.iterdir() if x.is_dir()]
+        print(" ", s.name, "->", len(series), "series")
+        for name in series[:10]:
+            print("    ", name)
+
+# Check XML files
+xml_root = Path("C:/LIDC_DATA/XML")
+print(f"\n\nXML folder exists: {xml_root.exists()}")
+if xml_root.exists():
+    xml_files = list(xml_root.glob("*.xml"))
+    print(f"Total XML files: {len(xml_files)}")
+    print("First 5 XML files:")
+    for xf in sorted(xml_files)[:5]:
+        print(f"  {xf.name}")
+
+# Check a sample patient for SEG series
+print(f"\n\nSample patient structure (LIDC-IDRI-0001):")
+sample_pid = root / "LIDC-IDRI-0001"
+for study in sample_pid.iterdir():
+    if study.is_dir():
+        print(f"\nStudy: {study.name}")
+        for series in sorted(study.iterdir()):
+            if series.is_dir():
+                dcm_files = list(series.glob("*.dcm"))
+                if "Segmentation" in series.name:
+                    print(f"  [SEG] {series.name.split('-')[0]} -> {len(dcm_files)} frames")
+                elif "evaluations" not in series.name:
+                    print(f"  [CT]  {series.name.split('-')[0]} -> {len(dcm_files)} slices")

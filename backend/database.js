@@ -5,9 +5,11 @@ dotenv.config();
 
 const DB_SERVER = process.env.DB_SERVER;
 const DB_DATABASE = process.env.DB_DATABASE || 'lung_nodule';
+const MASTER_CONNECTION_STRING = process.env.MASTER_CONNECTION_STRING;
+const APP_CONNECTION_STRING = process.env.APP_CONNECTION_STRING;
 
-if (!DB_SERVER) {
-  console.error('ERROR: DB_SERVER is not defined in .env file');
+if (!DB_SERVER && !MASTER_CONNECTION_STRING) {
+  console.error('ERROR: DB_SERVER or MASTER_CONNECTION_STRING is not defined in .env file');
   console.error('Please create a .env file based on .env.example');
   console.error('');
   console.error('Steps:');
@@ -18,7 +20,7 @@ if (!DB_SERVER) {
 }
 
 const masterConfig = {
-  connectionString: `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=master;Trusted_Connection=yes;`,
+  connectionString: MASTER_CONNECTION_STRING || `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=master;Trusted_Connection=yes;Encrypt=no;TrustServerCertificate=yes;`,
   pool: {
     max: 10,
     min: 0,
@@ -27,7 +29,7 @@ const masterConfig = {
 };
 
 const config = {
-  connectionString: `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=${DB_DATABASE};Trusted_Connection=yes;`,
+  connectionString: APP_CONNECTION_STRING || `Driver={ODBC Driver 17 for SQL Server};Server=${DB_SERVER};Database=${DB_DATABASE};Trusted_Connection=yes;Encrypt=no;TrustServerCertificate=yes;`,
   pool: {
     max: 10,
     min: 0,

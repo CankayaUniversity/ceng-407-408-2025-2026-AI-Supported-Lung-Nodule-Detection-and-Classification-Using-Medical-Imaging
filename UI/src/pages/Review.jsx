@@ -61,6 +61,7 @@ export default function Review(){
   const navigate = useNavigate();
   const viewerRef = useRef(null);
   const viewerInitialized = useRef(false);
+  const initialNoduleSliceDone = useRef(false);
   const dicomFilesRef = useRef([]);
   const viewportTimerRef = useRef(null);
   
@@ -81,30 +82,36 @@ export default function Review(){
   
   // Callback ref to initialize cornerstone when element is mounted
   const setViewerRef = useCallback((element) => {
-    if (element && !viewerRef.current) {
-      viewerRef.current = element;
-      console.log('Viewer element mounted, initializing cornerstone...');
-      
-      // Initialize cornerstone on this element
-      try {
-        cornerstone.enable(element);
-        setViewerReady(true);
-        console.log('Cornerstone enabled successfully');
-        
-        // Load first image if dicomFiles are available
-        if (dicomFilesRef.current.length > 0) {
-          const file = dicomFilesRef.current[0];
-          const imageId = `wadouri:http://localhost:3001${file.file_path}`;
-          cornerstone.loadAndCacheImage(imageId).then(image => {
-            cornerstone.displayImage(element, image);
-            cornerstone.resize(element, true);
-            enableImageTools(element);
-            console.log('First image displayed');
-          }).catch(err => console.error('Error loading first image:', err));
-        }
-      } catch (e) {
-        console.error('Error enabling cornerstone:', e);
+    if (!element) {
+      viewerRef.current = null;
+      setViewerReady(false);
+      return;
+    }
+
+    if (viewerRef.current === element) {
+      return;
+    }
+
+    viewerRef.current = element;
+    console.log('Viewer element mounted, initializing cornerstone...');
+
+    try {
+      cornerstone.enable(element);
+      setViewerReady(true);
+      console.log('Cornerstone enabled successfully');
+
+      if (dicomFilesRef.current.length > 0) {
+        const file = dicomFilesRef.current[0];
+        const imageId = `wadouri:http://localhost:3001${file.file_path}`;
+        cornerstone.loadAndCacheImage(imageId).then(image => {
+          cornerstone.displayImage(element, image);
+          cornerstone.resize(element, true);
+          enableImageTools(element);
+          console.log('First image displayed');
+        }).catch(err => console.error('Error loading first image:', err));
       }
+    } catch (e) {
+      console.error('Error enabling cornerstone:', e);
     }
   }, []);
   const [windowLevel, setWindowLevel] = useState(WINDOW_PRESETS.lung);
@@ -139,6 +146,132 @@ export default function Review(){
   useEffect(() => {
     console.log('State update - viewerReady:', viewerReady, 'dicomFiles:', dicomFiles.length, 'viewerRef:', !!viewerRef.current);
   }, [viewerReady, dicomFiles.length]);
+
+  const getNoduleImagePoint = useCallback((nodule, image) => {
+    const coords = nodule?.coordinates || {};
+    const pixelX = Number(coords.pixelX);
+    const pixelY = Number(coords.pixelY);
+
+    if (Number.isFinite(pixelX) && Number.isFinite(pixelY)) {
+      return { x: pixelX, y: pixelY };
+    }
+
+    const x = Number(coords.x);
+    const y = Number(coords.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return null;
+    }
+
+    const width = image?.columns || image?.width || 512;
+    const height = image?.rows || image?.height || 512;
+
+    // New results store x/y as percent for legacy UI compatibility.
+    // Older rows may have stored raw pixel coordinates in x/y.
+    if (x >= 0 && x <= 100 && y >= 0 && y <= 100) {
+      return { x: (x / 100) * width, y: (y / 100) * height };
+    }
+
+    return { x, y };
+  }, []);
+
+  const updateMarkerPositions = useCallback(() => {
+    const element = viewerRef.current;
+    if (!element || nodules.length === 0) {
+      setMarkerPositions({});
+      return;
+    }
+
+    try {
+      const enabledElement = cornerstone.getEnabledElement(element);
+      const image = enabledElement?.image;
+      if (!image) return;
+      const wrapperRect = element.parentElement?.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      const elementOffset = wrapperRect
+        ? {
+            x: elementRect.left - wrapperRect.left,
+            y: elementRect.top - wrapperRect.top
+          }
+        : { x: 0, y: 0 };
+
+      const nextPositions = {};
+      nodules.forEach((nodule, index) => {
+        if (getValidSliceIndex(nodule, dicomFiles.length) !== currentImageIndex) return;
+
+        const imagePoint = getNoduleImagePoint(nodule, image);
+        if (!imagePoint) return;
+
+        const canvasPoint = cornerstone.pixelToCanvas(element, imagePoint);
+        nextPositions[nodule.id || index] = {
+          left: `${canvasPoint.x + elementOffset.x}px`,
+          top: `${canvasPoint.y + elementOffset.y}px`
+        };
+      });
+
+      setMarkerPositions(nextPositions);
+
+      const overlayNodule =
+        (getValidSliceIndex(nodules[selectedNodule], dicomFiles.length) === currentImageIndex && nodules[selectedNodule]?.coordinates?.overlayUrl
+          ? nodules[selectedNodule]
+          : nodules.find(nodule => getValidSliceIndex(nodule, dicomFiles.length) === currentImageIndex && nodule.coordinates?.overlayUrl));
+      const heatmapNodule =
+        (getValidSliceIndex(nodules[selectedNodule], dicomFiles.length) === currentImageIndex && nodules[selectedNodule]?.coordinates?.heatmapUrl
+          ? nodules[selectedNodule]
+          : nodules.find(nodule => getValidSliceIndex(nodule, dicomFiles.length) === currentImageIndex && nodule.coordinates?.heatmapUrl));
+
+      const imageStyle = () => {
+        const topLeft = cornerstone.pixelToCanvas(element, { x: 0, y: 0 });
+        const bottomRight = cornerstone.pixelToCanvas(element, {
+          x: image.columns || image.width || 512,
+          y: image.rows || image.height || 512
+        });
+        const left = Math.min(topLeft.x, bottomRight.x);
+        const top = Math.min(topLeft.y, bottomRight.y);
+        const width = Math.abs(bottomRight.x - topLeft.x);
+        const height = Math.abs(bottomRight.y - topLeft.y);
+        return {
+          left: `${left + elementOffset.x}px`,
+          top: `${top + elementOffset.y}px`,
+          width: `${width}px`,
+          height: `${height}px`
+        };
+      };
+
+      if (overlayNodule?.coordinates?.overlayUrl) {
+        const overlayUrl = overlayNodule.coordinates.overlayUrl.startsWith('http')
+          ? overlayNodule.coordinates.overlayUrl
+          : `http://localhost:3001${overlayNodule.coordinates.overlayUrl}`;
+
+        setSegmentationOverlay({
+          src: overlayUrl,
+          style: imageStyle()
+        });
+      } else {
+        setSegmentationOverlay(null);
+      }
+
+      if (heatmapNodule?.coordinates?.heatmapUrl) {
+        const heatmapUrl = heatmapNodule.coordinates.heatmapUrl.startsWith('http')
+          ? heatmapNodule.coordinates.heatmapUrl
+          : `http://localhost:3001${heatmapNodule.coordinates.heatmapUrl}`;
+
+        setHeatmapOverlay({
+          src: heatmapUrl,
+          style: imageStyle()
+        });
+      } else {
+        setHeatmapOverlay(null);
+      }
+    } catch (error) {
+      console.error('Error updating nodule marker positions:', error);
+    }
+  }, [currentImageIndex, getNoduleImagePoint, nodules, selectedNodule]);
+
+  const scheduleOverlayUpdate = useCallback(() => {
+    requestAnimationFrame(updateMarkerPositions);
+    setTimeout(updateMarkerPositions, 60);
+    setTimeout(updateMarkerPositions, 180);
+  }, [updateMarkerPositions]);
 
   useEffect(() => {
     loadStudyData();
@@ -201,6 +334,21 @@ export default function Review(){
     }
   }, [currentImageIndex, dicomFiles.length]);
 
+  useEffect(() => {
+    const element = viewerRef.current;
+    if (!element || !viewerReady) return;
+
+    const handleImageRendered = () => scheduleOverlayUpdate();
+    element.addEventListener('cornerstoneimagerendered', handleImageRendered);
+    window.addEventListener('resize', handleImageRendered);
+    scheduleOverlayUpdate();
+
+    return () => {
+      element.removeEventListener('cornerstoneimagerendered', handleImageRendered);
+      window.removeEventListener('resize', handleImageRendered);
+    };
+  }, [scheduleOverlayUpdate, viewerReady]);
+
   // Also load when viewerReady changes
   useEffect(() => {
     if (viewerReady && dicomFiles.length > 0 && !viewerInitialized.current) {
@@ -243,6 +391,9 @@ export default function Review(){
   // Reset initialization flag when study changes
   useEffect(() => {
     viewerInitialized.current = false;
+    initialNoduleSliceDone.current = false;
+    setViewerReady(false);
+    setCurrentImageIndex(0);
   }, [studyId]);
 
   // Initialize cornerstone when dicomFiles are loaded
@@ -355,26 +506,6 @@ export default function Review(){
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [viewerReady]);
-
-  // Mouse wheel scroll for slice navigation
-  useEffect(() => {
-    const element = viewerRef.current;
-    if (!element || dicomFiles.length === 0) return;
-    
-    const handleWheel = (e) => {
-      e.preventDefault();
-      if (e.deltaY > 0) {
-        // Scroll down - next slice
-        setCurrentImageIndex(prev => Math.min(prev + 1, dicomFiles.length - 1));
-      } else {
-        // Scroll up - previous slice
-        setCurrentImageIndex(prev => Math.max(prev - 1, 0));
-      }
-    };
-    
-    element.addEventListener('wheel', handleWheel, { passive: false });
-    return () => element.removeEventListener('wheel', handleWheel);
-  }, [dicomFiles.length]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -513,6 +644,7 @@ export default function Review(){
       
       if (response.ok) {
         const studyData = await response.json();
+        let sortedFiles = [];
         
         setStudy({
           id: studyData.study_id,
@@ -526,18 +658,19 @@ export default function Review(){
           age: studyData.patient_age,
           gender: studyData.patient_gender,
           clinicalInfo: studyData.clinical_note || null,
-          hasPreviousCT: Math.random() > 0.5
+          hasPreviousCT: false
         });
         
         if (studyData.dicomFiles && studyData.dicomFiles.length > 0) {
           console.log('DICOM files found:', studyData.dicomFiles.length);
-          const sortedFiles = studyData.dicomFiles.sort((a, b) => 
+          sortedFiles = [...studyData.dicomFiles].sort((a, b) => 
             a.file_name.localeCompare(b.file_name, undefined, { numeric: true })
           );
           setDicomFiles(sortedFiles);
           console.log('First DICOM file:', sortedFiles[0]);
         } else {
           console.log('No DICOM files found for this study');
+          setDicomFiles([]);
         }
 
         // Load nodules: prefer real DB nodules, fall back to mock
@@ -641,7 +774,8 @@ export default function Review(){
       'RML': 'Right Middle Lobe',
       'RLL': 'Right Lower Lobe',
       'LUL': 'Left Upper Lobe',
-      'LLL': 'Left Lower Lobe'
+      'LLL': 'Left Lower Lobe',
+      'AI': 'Model Candidate'
     };
     return names[abbr] || abbr;
   };
@@ -667,6 +801,7 @@ export default function Review(){
       
       // Display immediately without resize delay
       cornerstone.displayImage(viewerRef.current, image);
+      cornerstone.resize(viewerRef.current, true);
       
       // Apply current viewport settings (preserve zoom and window/level between slices)
       const viewport = cornerstone.getViewport(viewerRef.current);
@@ -678,6 +813,7 @@ export default function Review(){
       }
       
       enableImageTools(viewerRef.current);
+      scheduleOverlayUpdate();
     } catch (error) {
       console.error('Error loading DICOM image:', error);
     }
@@ -694,6 +830,7 @@ export default function Review(){
         viewport.voi.windowWidth = preset.ww;
         viewport.voi.windowCenter = preset.wc;
         cornerstone.setViewport(viewerRef.current, viewport);
+        scheduleOverlayUpdate();
       }
     }
   };
@@ -711,6 +848,7 @@ export default function Review(){
           cornerstone.setViewport(viewerRef.current, viewport);
           setZoom(1);
           applyWindowPreset('lung');
+          scheduleOverlayUpdate();
         }
       } catch (e) {
         console.error('Error resetting view:', e);
@@ -726,16 +864,22 @@ export default function Review(){
       if (viewport) {
         viewport.scale = newZoom;
         cornerstone.setViewport(viewerRef.current, viewport);
+        scheduleOverlayUpdate();
       }
     }
   };
 
   const goToNoduleSlice = (nodule, index) => {
-    if (nodule.sliceIndex !== undefined && nodule.sliceIndex < dicomFiles.length) {
-      setCurrentImageIndex(nodule.sliceIndex);
-    }
+    const targetSliceIndex = getValidSliceIndex(nodule, dicomFiles.length);
+    setCurrentImageIndex(targetSliceIndex);
     setSelectedNodule(index);
     updateNodule(index, 'reviewed', true);
+
+    if (viewerRef.current && dicomFiles[targetSliceIndex]) {
+      loadDicomImage(targetSliceIndex);
+    } else {
+      scheduleOverlayUpdate();
+    }
   };
 
   const updateNodule = async (index, field, value) => {
@@ -793,6 +937,35 @@ export default function Review(){
     setReportGenerating(true);
     
     try {
+      let nlpAnalysis = null;
+      try {
+        const nlpResponse = await fetch(`${API_URL}/nlp/analyze-note`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            study_id: studyId,
+            patient_age: study.age,
+            patient_gender: study.gender,
+            clinical_note: study.clinicalInfo || '',
+            description: study.description || '',
+            nodules: nodules.map((nodule) => ({
+              id: nodule.id,
+              risk: nodule.risk,
+              notes: nodule.notes,
+              doctorAssessment: nodule.doctorAssessment,
+              includeInReport: nodule.includeInReport,
+            })),
+          })
+        });
+
+        if (nlpResponse.ok) {
+          const nlpResult = await nlpResponse.json();
+          nlpAnalysis = nlpResult.analysis || null;
+        }
+      } catch (nlpError) {
+        console.error('Error running report NLP analysis:', nlpError);
+      }
+
       const reportData = {
         study_id: studyId,
         patient_id: study.patientID,
@@ -804,6 +977,7 @@ export default function Review(){
           study: study,
           nodules: nodules.filter(n => n.includeInReport),
           allNodules: nodules,
+          nlpAnalysis,
           generatedAt: new Date().toISOString()
         },
         generated_by: localStorage.getItem('userFirstName') + ' ' + localStorage.getItem('userLastName'),
@@ -860,6 +1034,8 @@ export default function Review(){
   }
 
   const currentNodule = nodules[selectedNodule];
+  const reviewedCount = nodules.filter(n => n.reviewed).length;
+  const candidateHeaderText = getCandidateHeaderText(nodules.length);
 
   return (
     <div className={`review-page ${isFullscreen ? 'fullscreen' : ''}`}>
@@ -879,7 +1055,7 @@ export default function Review(){
             {study.status}
           </span>
           <span className="nodule-badge">
-            {nodules.filter(n => n.reviewed).length}/{nodules.length} Reviewed
+            {nodules.length > 0 ? `${reviewedCount}/${nodules.length} Reviewed` : 'No candidates'}
           </span>
         </div>
         <div className="header-right">
@@ -923,8 +1099,8 @@ export default function Review(){
                   <h4>AI Analysis</h4>
                   <div className="ai-stats-list">
                     <div className="ai-stat-row">
-                      <span className="ai-stat-label">Total Nodules</span>
-                      <span className="ai-stat-value">{study.noduleCount}</span>
+                      <span className="ai-stat-label">AI Candidates</span>
+                      <span className="ai-stat-value">{nodules.length}</span>
                     </div>
                     <div className="ai-stat-row">
                       <span className="ai-stat-label">High Risk</span>
@@ -940,7 +1116,7 @@ export default function Review(){
                     </div>
                     {nodules.length > 0 && (
                       <div className="ai-stat-row">
-                        <span className="ai-stat-label">Largest</span>
+                        <span className="ai-stat-label">Largest Eq. Diameter</span>
                         <span className="ai-stat-value">
                           {Math.max(...nodules.map(n => parseFloat(n.size))).toFixed(1)} mm ({nodules.reduce((max, n) => parseFloat(n.size) > parseFloat(max.size) ? n : max, nodules[0]).location})
                         </span>
@@ -986,7 +1162,7 @@ export default function Review(){
             </div>
           </div>
 
-          <div className="viewer-wrapper">
+          <div className={`viewer-wrapper ${showHeatmap ? 'heat-active' : ''}`}>
             {dicomFiles.length > 0 ? (
               <>
                 <div 
@@ -1178,10 +1354,22 @@ export default function Review(){
                       <span className={`risk-badge ${nodule.risk}`}>{nodule.risk.toUpperCase()}</span>
                     </div>
                     <div className="nodule-item-info">
-                      <span>{nodule.location} - {nodule.size}mm</span>
+                      <span>Slice {getValidSliceIndex(nodule, dicomFiles.length) + 1} - {nodule.size} mm eq. dia.</span>
+                      <span>
+                        Seg {clampPercent(getSegmentationProbability(nodule)).toFixed(0)}%
+                        {getClassifierProbability(nodule) !== null && ` | Cls ${getCandidateLikelihood(nodule).toFixed(0)}%`}
+                      </span>
                     </div>
                   </div>
-                )) : <div className="no-nodules">No nodules detected</div>}
+                )) : (
+                  <div className="no-nodules">
+                    <strong>No AI candidates detected</strong>
+                    <span>
+                      The CT viewer is still available, but this study currently has no model-selected
+                      review candidate.
+                    </span>
+                  </div>
+                )}
               </div>
 
               {nodules.length > 0 && currentNodule && (
@@ -1196,22 +1384,32 @@ export default function Review(){
                       <div className="detail-row">
                         <label>Location</label>
                         <select value={currentNodule.location} onChange={(e) => updateNodule(selectedNodule, 'location', e.target.value)}>
+                          <option value="AI">Model Candidate</option>
                           <option value="RUL">RUL</option><option value="RML">RML</option><option value="RLL">RLL</option>
                           <option value="LUL">LUL</option><option value="LLL">LLL</option>
                         </select>
                       </div>
                       <div className="detail-row">
-                        <label>Size (mm)</label>
+                        <label>Equivalent Diameter (mm)</label>
                         <input type="number" value={currentNodule.size} onChange={(e) => updateNodule(selectedNodule, 'size', e.target.value)} step="0.1" />
                       </div>
                     </div>
 
                     <div className="detail-section">
-                      <label>AI Malignancy</label>
+                      <label>Nodule Likelihood</label>
                       <div className="probability-display">
-                        <div className="probability-bar"><div className={`probability-fill ${currentNodule.risk}`} style={{ width: `${currentNodule.probability * 100}%` }} /></div>
-                        <span>{(currentNodule.probability * 100).toFixed(0)}%</span>
+                        <div className="probability-bar"><div className={`probability-fill ${currentNodule.risk}`} style={{ width: `${getCandidateLikelihood(currentNodule, nodules)}%` }} /></div>
+                        <span>{getCandidateLikelihood(currentNodule, nodules).toFixed(0)}%</span>
                       </div>
+                      <div className="classification-result">
+                        <span>Segmentation probability: {getSegmentationProbability(currentNodule).toFixed(3)}</span>
+                      </div>
+                      {getClassifierProbability(currentNodule) !== null && (
+                        <div className="classification-result">
+                          <strong>{getClassificationLabel(currentNodule)}</strong>
+                          <span>Classifier probability: {getClassifierProbability(currentNodule).toFixed(3)}</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="detail-section xai-section">
@@ -1224,7 +1422,21 @@ export default function Review(){
                           </div>
                         ))}
                       </div>
-                    </div>
+                    )}
+
+                    {currentNodule.xaiExplanations?.length > 0 && (
+                      <div className="detail-section xai-section">
+                        <label>XAI Explanation</label>
+                        <div className="xai-features">
+                          {currentNodule.xaiExplanations.map((exp, i) => (
+                            <div key={i} className="xai-feature">
+                              <span>{exp.feature}</span>
+                              <div className="confidence-bar"><div style={{ width: `${exp.confidence * 100}%` }} /><span>{(exp.confidence * 100).toFixed(0)}%</span></div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {currentNodule.centerVoxel && (
                       <div className="detail-section">
@@ -1270,6 +1482,26 @@ export default function Review(){
                   <button className="generate-report-btn" onClick={() => setShowReportModal(true)}>Save Report</button>
                 </div>
               )}
+
+              {nodules.length === 0 && (
+                <div className="nodule-details empty-details">
+                  <div className="details-header">
+                    <h4>{candidateHeaderText}</h4>
+                  </div>
+                  <div className="details-content">
+                    <div className="empty-state-card">
+                      <p>
+                        This study is currently behaving like a no-candidate case in the review UI.
+                      </p>
+                      <ul>
+                        <li>No final AI candidate was selected by the pipeline.</li>
+                        <li>Segmentation and classifier outputs did not produce a reviewable final candidate.</li>
+                        <li>You can still inspect slices manually in the viewer.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
         </div>
       </div>
 
@@ -1292,7 +1524,7 @@ export default function Review(){
                 <h4>Report Summary</h4>
                 <div className="summary-row"><span>Patient:</span><span>{study.patientName}</span></div>
                 <div className="summary-row"><span>Study Date:</span><span>{study.studyDate}</span></div>
-                <div className="summary-row"><span>Total Nodules:</span><span>{nodules.length}</span></div>
+                <div className="summary-row"><span>AI Candidates:</span><span>{nodules.length}</span></div>
                 <div className="summary-row"><span>Included:</span><span>{nodules.filter(n => n.includeInReport).length}</span></div>
                 <div className="summary-row"><span>Reviewed:</span><span>{nodules.filter(n => n.reviewed).length}/{nodules.length}</span></div>
               </div>
@@ -1304,7 +1536,7 @@ export default function Review(){
                     <span className={`risk-tag ${nodule.risk}`}>{nodule.risk}</span>
                     {nodule.doctorAssessment && <span className={`assessment-tag ${nodule.doctorAssessment}`}>{nodule.doctorAssessment}</span>}
                   </div>
-                ))}
+                )}
               </div>
               <div className="report-options">
                 <label className="checkbox-row"><input type="checkbox" defaultChecked /><span>Include AI analysis</span></label>

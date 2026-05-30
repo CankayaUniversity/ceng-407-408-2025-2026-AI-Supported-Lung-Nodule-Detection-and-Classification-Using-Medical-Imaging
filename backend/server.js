@@ -6,6 +6,7 @@ import fs from 'fs';
 import http from 'http';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { spawn } from 'child_process';
 
 // http.request wrapper — no internal timeout, works for long AI analyses
 function httpPost(url, data) {
@@ -81,6 +82,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const PYTHON_EXECUTABLE = process.env.PYTHON_EXECUTABLE || 'python';
 
 // Middleware
 app.use(cors({
@@ -90,6 +92,48 @@ app.use(cors({
   exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length']
 }));
 app.use(express.json());
+
+const runPythonJsonScript = (scriptName, payload) => new Promise((resolve, reject) => {
+  const pythonProcess = spawn(PYTHON_EXECUTABLE, [scriptName], {
+    cwd: __dirname,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1'
+    }
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  pythonProcess.stdout.on('data', (data) => {
+    stdout += data.toString('utf8');
+  });
+
+  pythonProcess.stderr.on('data', (data) => {
+    stderr += data.toString('utf8');
+  });
+
+  pythonProcess.on('error', (error) => {
+    reject(error);
+  });
+
+  pythonProcess.on('close', (code) => {
+    if (code !== 0) {
+      reject(new Error(stderr || `Python process exited with code ${code}`));
+      return;
+    }
+
+    try {
+      resolve(JSON.parse(stdout));
+    } catch (error) {
+      reject(new Error(`Failed to parse Python JSON output: ${error.message}`));
+    }
+  });
+
+  pythonProcess.stdin.end(Buffer.from(JSON.stringify(payload || {}), 'utf8'));
+});
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -352,6 +396,245 @@ app.post('/api/seed-dicoms', async (req, res) => {
   } catch (error) {
     console.error('Error seeding DICOMs:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+const SEGMENTATION_MODELS = {
+  best: {
+    label: 'Best SegResNet',
+    file: 'segresnet_25d_best_.pt'
+  },
+  adam: {
+    label: 'Adam 25D',
+    file: 'segresnet_25d_adam.pt'
+  }
+};
+
+app.post('/api/nlp/analyze-note', async (req, res) => {
+  try {
+    const analysis = await runPythonJsonScript('nlp_analysis.py', req.body || {});
+    res.json({ success: true, analysis });
+  } catch (error) {
+    console.error('Error running NLP analysis:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============ AI ANALYSIS ROUTE ============
+app.post('/api/analyze-dicom/:studyId', async (req, res) => {
+  const studyId = req.params.studyId;
+  const topK = Math.min(req.body?.top_k || 3, 3);
+  const requestedModelKey = req.body?.modelKey || req.query?.model || 'best';
+  const selectedModel = SEGMENTATION_MODELS[requestedModelKey];
+
+  if (!selectedModel) {
+    return res.status(400).json({
+      success: false,
+      error: `Unknown segmentation model "${requestedModelKey}". Available models: ${Object.keys(SEGMENTATION_MODELS).join(', ')}`
+    });
+  }
+  
+  try {
+    console.log(`Starting AI analysis for study: ${studyId} with model: ${requestedModelKey}`);
+    
+    // Get study data to verify it exists
+    const study = await getStudy(studyId);
+    if (!study) {
+      return res.status(404).json({ 
+        success: false, 
+        error: `Study not found: ${studyId}` 
+      });
+    }
+    
+    // Get DICOM files for this study
+    const dicomFiles = await getDicomFilesByStudy(studyId);
+    if (!dicomFiles || dicomFiles.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        error: `No DICOM files found for study: ${studyId}` 
+      });
+    }
+    
+    // Prepare paths
+    const studyDir = path.join(__dirname, 'uploads', studyId);
+    const modelPath = path.join(__dirname, 'models', selectedModel.file);
+    const overlaysDir = path.join(__dirname, 'uploads', studyId, 'overlays');
+    
+    // Check model exists
+    if (!fs.existsSync(modelPath)) {
+      return res.status(500).json({ 
+        success: false, 
+        error: `Model checkpoint not found at ${modelPath}` 
+      });
+    }
+    
+    // Run Python analysis asynchronously
+    console.log(`Running analysis with: ${PYTHON_EXECUTABLE} run_analysis.py "${studyDir}" "${modelPath}" "${overlaysDir}" ${topK}`);
+    
+    const pythonProcess = spawn(PYTHON_EXECUTABLE, [
+      'run_analysis.py',
+      studyDir,
+      modelPath,
+      overlaysDir,
+      topK.toString()
+    ], {
+      cwd: __dirname,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    pythonProcess.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    
+    pythonProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+      console.error('Python stderr:', data.toString());
+    });
+    
+    pythonProcess.on('close', async (code) => {
+      try {
+        if (code !== 0) {
+          console.error('Python process failed with code:', code);
+          console.error('stdout:', stdout);
+          console.error('stderr:', stderr);
+          return res.status(500).json({
+            success: false,
+            error: `AI analysis failed: ${stderr || 'Unknown error'}`
+          });
+        }
+        
+        // Parse JSON results from stdout
+        const analysisResults = JSON.parse(stdout);
+        
+        if (!analysisResults.success) {
+          return res.status(500).json({
+            success: false,
+            error: analysisResults.error || 'AI analysis failed'
+          });
+        }
+        
+        // Save candidates to database
+        console.log(`Analysis found ${analysisResults.top_candidates} candidates`);
+        
+        // Delete existing nodules for this study
+        await deleteNodulesByStudy(studyId);
+        
+        // Save new nodules from analysis
+        for (let i = 0; i < analysisResults.candidates.length; i++) {
+          const candidate = analysisResults.candidates[i];
+          const overlayUrl = candidate.overlayUrl
+            ? `/uploads/${studyId}/overlays/${path.basename(candidate.overlayUrl)}`
+            : null;
+          const overlayPath = overlayUrl ? path.join(__dirname, overlayUrl.replace(/^\/uploads\//, 'uploads/')) : null;
+          const safeOverlayUrl = overlayPath && fs.existsSync(overlayPath) ? overlayUrl : null;
+          const coordinates = {
+            ...(candidate.coordinates || {}),
+            bbox: candidate.bbox || null,
+            overlayUrl: safeOverlayUrl,
+            maskUrl: candidate.maskUrl || null,
+            segmentationModel: requestedModelKey,
+            segmentationModelLabel: selectedModel.label,
+            heatmapUrl: null,
+            classifierCropUrl: null,
+            classifierGradcamUrl: null,
+            classifierPanelsUrl: null,
+            classifierFullGradcamUrl: null,
+            modelSliceIndex: candidate.modelSliceIndex ?? null,
+            windowSize: candidate.windowSize ?? null,
+            score: candidate.score ?? null,
+            maxProbability: candidate.maxProbability ?? null,
+            maskArea: candidate.maskArea ?? null,
+            segmentationProbability: candidate.segmentationProbability ?? null,
+            classificationProbability: candidate.classificationProbability ?? null,
+            classificationPredictedClass: candidate.classificationPredictedClass ?? null,
+            classificationLabel: candidate.classificationLabel ?? null,
+            classificationCenter: candidate.classificationCenter ?? null,
+            classificationCrop: candidate.classificationCrop ?? null,
+            gradcamShape: candidate.gradcamShape ?? null
+          };
+
+          if (candidate.heatmapUrl) {
+            const heatmapUrl = candidate.heatmapUrl.includes('classifier_explanations')
+              ? `/uploads/${studyId}/overlays/classifier_explanations/${path.basename(candidate.heatmapUrl)}`
+              : `/uploads/${studyId}/overlays/${path.basename(candidate.heatmapUrl)}`;
+            const heatmapPath = path.join(__dirname, heatmapUrl.replace(/^\/uploads\//, 'uploads/'));
+            coordinates.heatmapUrl = fs.existsSync(heatmapPath) ? heatmapUrl : null;
+          }
+
+          for (const [field, value] of [
+            ['classifierCropUrl', candidate.classifierCropUrl],
+            ['classifierGradcamUrl', candidate.classifierGradcamUrl],
+            ['classifierPanelsUrl', candidate.classifierPanelsUrl],
+            ['classifierFullGradcamUrl', candidate.classifierFullGradcamUrl]
+          ]) {
+            if (!value) continue;
+            const assetUrl = `/uploads/${studyId}/overlays/classifier_explanations/${path.basename(value)}`;
+            const assetPath = path.join(__dirname, assetUrl.replace(/^\/uploads\//, 'uploads/'));
+            coordinates[field] = fs.existsSync(assetPath) ? assetUrl : null;
+          }
+
+          const classifierProbability = candidate.classificationProbability ?? null;
+          const classifierNote = candidate.classificationLabel
+            ? `Model prediction - ${selectedModel.label}; Confidence: ${candidate.confidence}; Classifier: ${candidate.classificationLabel}${classifierProbability ? ` (${classifierProbability})` : ''}`
+            : `Model prediction - ${selectedModel.label}; Confidence: ${candidate.confidence}`;
+          const noduleData = {
+            study_id: studyId,
+            nodule_number: candidate.nodule_number,
+            location: candidate.location,
+            size_mm: parseFloat(candidate.size),
+            risk_level: candidate.risk,
+            coordinates: JSON.stringify(coordinates),
+            slice_index: candidate.sliceIndex,
+            probability: parseFloat(candidate.probability),
+            doctor_assessment: null,
+            notes: classifierNote,
+            include_in_report: true,
+            reviewed: false
+          };
+          
+          try {
+            await saveNodule(noduleData);
+          } catch (dbError) {
+            console.warn(`Failed to save nodule ${i}:`, dbError.message);
+          }
+        }
+        
+        // Update study status
+        await updateStudyStatus(studyId, 'completed', analysisResults.top_candidates);
+        
+        // Return results
+        res.json({
+          success: true,
+          nodule_count: analysisResults.top_candidates,
+          candidates: analysisResults.candidates,
+          metadata: {
+            segmentation_model: requestedModelKey,
+            segmentation_model_label: selectedModel.label,
+            total_slices: analysisResults.num_slices,
+            volume_shape: analysisResults.volume_shape,
+            total_regions_found: analysisResults.total_candidates_found
+          }
+        });
+        
+      } catch (parseError) {
+        console.error('Error parsing analysis results:', parseError);
+        console.error('Python output:', stdout);
+        res.status(500).json({
+          success: false,
+          error: `Failed to parse analysis results: ${parseError.message}`
+        });
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error starting analysis:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: `Analysis error: ${error.message}` 
+    });
   }
 });
 

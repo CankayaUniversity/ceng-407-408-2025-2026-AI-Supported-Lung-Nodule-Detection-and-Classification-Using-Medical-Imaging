@@ -31,6 +31,28 @@ Thumbs.db
 backend/uploads/*
 !backend/uploads/.gitkeep
 
+# Backend generated data / medical data
+backend/outputs/
+backend/latest_result*.json
+backend/**/*.dcm
+backend/**/*.DCM
+
+# Model checkpoints are large; keep them outside git and document where to place them.
+backend/models/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Test/debug artifacts
+backend/test_setup.py
+IMPLEMENTATION_REPORT.md
+
 lung25demo/
 
 # AI service model weights and cache (large binary files, downloaded from HuggingFace)
