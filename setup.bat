@@ -82,7 +82,7 @@ echo.
 
 start "LungXAI Backend"    cmd /k "cd /d "%ROOT%backend" && node server.js"
 timeout /t 2 /nobreak >nul
-start "LungXAI AI Service" cmd /k "cd /d "%ROOT%backend\ai_service" && pip install -r requirements.txt -q && python main.py"
+start "LungXAI AI Service" cmd /k "cd /d %ROOT%backend\ai_service && pip install -r requirements.txt -q && python main.py"
 timeout /t 2 /nobreak >nul
 start "LungXAI Frontend"   cmd /k "cd /d "%ROOT%UI" && npm run dev"
 

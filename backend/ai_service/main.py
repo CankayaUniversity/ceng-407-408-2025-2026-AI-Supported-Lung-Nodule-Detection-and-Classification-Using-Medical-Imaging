@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
-SERVICE_DIR = Path(__file__).parent
+SERVICE_DIR = Path(__file__).resolve().parent
 MODEL_DIR   = SERVICE_DIR / "model"
 STAGE1_PTH  = MODEL_DIR / "stage1_detector_v2.pth"
 STAGE2_PTH  = MODEL_DIR / "student_2p5d_best.pth"
