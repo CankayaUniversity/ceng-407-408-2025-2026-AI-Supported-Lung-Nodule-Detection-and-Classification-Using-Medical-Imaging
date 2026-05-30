@@ -37,13 +37,6 @@ backend/latest_result*.json
 backend/**/*.dcm
 backend/**/*.DCM
 
-# Model checkpoints are large; keep them outside git and document where to place them.
-backend/models/
-*.pt
-*.pth
-*.ckpt
-*.onnx
-
 # Python cache
 __pycache__/
 **/__pycache__/
