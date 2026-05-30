@@ -61,21 +61,8 @@ copy "%ROOT%backend\.env.example" "%ROOT%backend\.env" >nul
 echo       Created backend\.env from .env.example
 
 :check_env
-findstr /c:"DB_SERVER=." "%ROOT%backend\.env" >nul 2>&1
-if not errorlevel 1 goto :env_ok
-echo.
-echo  *** ACTION REQUIRED ***
-echo  DB_SERVER is not set in backend\.env
-echo  Opening Notepad — set DB_SERVER to your SQL Server instance:
-echo    DB_SERVER=.\SQLEXPRESS         (most common)
-echo    DB_SERVER=localhost\SQLEXPRESS
-echo.
-start /wait notepad.exe "%ROOT%backend\.env"
-echo       .env saved. Continuing...
-goto :launch
-
-:env_ok
-echo       .env is configured.
+echo       .env is ready.
+echo       Default DB_SERVER=localhost\SQLEXPRESS — change in backend\.env if your instance differs.
 goto :launch
 
 :env_missing
