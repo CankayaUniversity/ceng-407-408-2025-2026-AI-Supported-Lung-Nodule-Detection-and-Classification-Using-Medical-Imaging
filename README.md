@@ -49,8 +49,10 @@ The pipeline chains a 3D nodule-centre detector (Stage 1) with a 2.5D concept-bo
 pulmo-app/
 ├── ai/                          # AI models & ML components
 │   ├── Pulmo/                   # Two-stage pipeline (Git submodule)
-│   ├── segresnet_25d_best.pt    # SegResNet model checkpoint
-│   └── models.zip               # Additional model archive
+│   └── models/                  # Model checkpoints
+│       ├── segresnet_25d_best_.pt   # Best SegResNet checkpoint
+│       ├── segresnet_25d_adam.pt    # Adam SegResNet checkpoint
+│       └── ogrenci_model_25D_full.pt  # Classifier model
 ├── backend/                     # Node.js API + Python AI service
 │   ├── ai_service/              # FastAPI inference service (Pulmo)
 │   ├── ai_analysis.py           # SegResNet analysis pipeline
@@ -110,7 +112,7 @@ The **Pulmo** submodule contains the complete deep learning pipeline, developed 
 
 | Document | Description |
 |----------|-------------|
-| [MODEL.md](MODEL.md) | Model ownership & development policy |
+| [docs/MODEL.md](docs/MODEL.md) | Model ownership & development policy |
 | [docs/AUDIT_FINAL_REPORT.md](docs/AUDIT_FINAL_REPORT.md) | LIDC-IDRI alignment audit |
 | [docs/PIPELINE_IMPROVEMENTS_SUMMARY.md](docs/PIPELINE_IMPROVEMENTS_SUMMARY.md) | Pipeline improvement history |
 | [docs/PIPELINE_REVIEW.md](docs/PIPELINE_REVIEW.md) | Pipeline review notes |
@@ -122,11 +124,58 @@ The **Pulmo** submodule contains the complete deep learning pipeline, developed 
 
 ### Clone
 
+This repository uses a **Git submodule** (`ai/Pulmo`). A plain `git clone` will leave the submodule folder empty — you must use one of the methods below.
+
+#### Option A — Clone everything at once (recommended)
+
 ```bash
-git clone --recurse-submodules <repo-url>
+git clone --recurse-submodules https://github.com/CankayaUniversity/ceng-407-408-2025-2026-AI-Supported-Lung-Nodule-Detection-and-Classification-Using-Medical-Imaging.git
 ```
 
-### Start All Services
+#### Option B — Already cloned without `--recurse-submodules`?
+
+```bash
+git submodule update --init --recursive
+```
+
+This fetches the Pulmo submodule from:
+```
+https://github.com/ariyulistanbul/Pulmo.git
+```
+
+#### Pulling Updates
+
+When the main repo has new commits:
+
+```bash
+git pull
+git submodule update --recursive
+```
+
+Or in one command:
+
+```bash
+git pull && git submodule update --recursive
+```
+
+> **Note:** If someone updates the Pulmo submodule pointer, `git submodule update --recursive` will check out the new commit. Never commit inside `ai/Pulmo` directly — all model development happens in the [Pulmo repository](https://github.com/ariyulistanbul/Pulmo).
+
+### First Time — Run Setup
+
+```bash
+setup.bat
+```
+
+`setup.bat` automatically:
+- Checks Node.js and Python are installed
+- Runs `npm install` for backend and UI (skips if already done)
+- Installs all Python packages (`backend/requirements.txt`, `ai_service/requirements.txt`)
+- Creates `backend/.env` from `.env.example` if missing (with a prompt to configure `DB_SERVER`)
+- Launches the application via `start.bat`
+
+If any step fails a popup appears with the error and manual fix instructions.
+
+### Subsequent Runs
 
 ```bash
 start.bat
@@ -140,7 +189,39 @@ start.bat
 
 ### First Run: Download Pulmo Model
 
-Open http://localhost:5173/new-study → click **Download Pulmo** in the AI Analysis section.
+Once the application is running, navigate to the New Study page and click **Download Pulmo** in the AI Analysis section.
+
+```
+http://localhost:5173/new-study
+```
+
+---
+
+## Installation Options
+
+There are two ways to install and run the project after cloning:
+
+### Option 1 — Automatic (recommended)
+
+```bash
+setup.bat
+```
+
+Handles everything in one step: checks prerequisites, installs all dependencies, configures `.env`, and launches the application. A popup appears if any step fails, with instructions for manual resolution.
+
+### Option 2 — Manual
+
+Follow the step-by-step instructions in **[docs/UI_Setup.md](docs/UI_Setup.md)**:
+
+- Install Node.js and Python dependencies
+- Configure `backend/.env`
+- Set up the SQL Server database
+
+Once setup is complete, launch the application with:
+
+```bash
+start.bat
+```
 
 ---
 
