@@ -1,0 +1,372 @@
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+from monai.networks.nets import SegResNet
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam import GradCAMPlusPlus
+from pytorch_grad_cam.utils.model_targets import SemanticSegmentationTarget
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from io import BytesIO
+import zipfile
+import requests
+import matplotlib.colors as mcolors
+
+import sys
+sys.path.append("Pulmo/src")
+# from model import build_model, gradcam_target_layers
+import pydicom
+import cv2
+
+pat_id = "14"
+pat_id = pat_id.zfill(4)  # ID'yi 4 haneli yap (örneğin "0002")
+
+# PyDrive2 kimlik doğrulama (settings.yaml ile otomatik yapılandırma)
+gauth = GoogleAuth()  # settings.yaml dosyasını otomatik yükler
+
+# Eğer credentials varsa kullan, yoksa giriş yap
+if gauth.credentials and not gauth.access_token_expired:
+    print("Kaydedilmiş credentials kullanılıyor...")
+else:
+    print("Yeni giriş yapılıyor...")
+    gauth.LocalWebserverAuth()
+
+drive = GoogleDrive(gauth)
+
+def find_file_by_path(root_folder_id, path_list):
+    """Klasör hiyerarşisi içinde dosya bulmak için path kullan"""
+    current_parent_id = root_folder_id
+    
+    for item_name in path_list[:-1]:  # Son öğe dosya adı
+        # Klasör ara
+        query = f"'{current_parent_id}' in parents and title = '{item_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed=false"
+        file_list = drive.ListFile({'q': query}).GetList()
+        
+        if not file_list:
+            return None
+            
+        target_item = file_list[0]
+        current_parent_id = target_item['id']
+    
+    # Son öğe dosya adı
+    file_name = path_list[-1]
+    query = f"'{current_parent_id}' in parents and title = '{file_name}' and trashed=false"
+    file_list = drive.ListFile({'q': query}).GetList()
+    
+    if file_list:
+        return file_list[0]['id']
+    return None
+
+# model kısmı
+
+def build_segresnet_model():
+    model = SegResNet(
+        spatial_dims=2,
+        init_filters=8,
+        in_channels=5,
+        out_channels=1,
+        blocks_down=(1, 2, 2, 4),
+        blocks_up=(1, 1, 1),
+        use_conv_final=True,
+    )
+
+    ckpt = torch.load("segresnet_25d_best.pt", map_location="cpu")
+    if isinstance(ckpt, dict):
+        if "model_state_dict" in ckpt:
+            state_dict = ckpt["model_state_dict"]
+        elif "state_dict" in ckpt:
+            state_dict = ckpt["state_dict"]
+        else:
+            state_dict = ckpt
+    else:
+        state_dict = ckpt
+
+    model.load_state_dict(state_dict)
+    model.eval()
+    return model
+
+
+def get_target_layers(model):
+    if hasattr(model, "down_layers"):
+        return [model.down_layers[-1]]
+    if hasattr(model, "layer4"):
+        return [model.layer4[-1]]
+    if hasattr(model, "features"):
+        return [model.features[-1]]
+    raise ValueError(f"Cannot find target layer for Grad-CAM. Model type: {type(model)}")
+
+
+model = build_segresnet_model()
+
+
+
+root_folder_id = "1q0pLM_HLT1lZgzy0Vllkc3S4bfcst5TV"  
+path = [f"LIDC-IDRI-{pat_id}",  f"LIDC-IDRI-{pat_id}_data.npz"]
+
+print(f"ZIP dosyası aranıyor: {'/'.join(path)}")
+zip_id = find_file_by_path(root_folder_id, path)
+
+if zip_id is None:
+    print("ZIP dosyası bulunamadı!")
+    print("Klasör yapısını kontrol edin...")
+    
+    # Debug için ana klasör içeriğini listele
+    query = f"'{root_folder_id}' in parents and trashed=false"
+    file_list = drive.ListFile({'q': query}).GetList()
+    print("Ana klasördeki öğeler:")
+    for file in file_list:
+        file_type = "Klasör" if file['mimeType'] == 'application/vnd.google-apps.folder' else "Dosya"
+        print(f"  - {file['title']} ({file_type})")
+    
+    exit()
+
+print(f"Dosya bulundu! ID: {zip_id}")
+
+# ZIP dosyasını bellek içinde indir (PyDrive2 yerine requests kullan)
+zip_url = f"https://drive.google.com/uc?id={zip_id}&export=download"
+print("ZIP dosyası indiriliyor...")
+response = requests.get(zip_url)
+if response.status_code != 200:
+    print(f"Dosya indirilemedi, durum kodu: {response.status_code}")
+    exit()
+
+filename = path[-1].lower()
+selected_data = BytesIO(response.content)
+
+dicom = None
+mask = None
+image = None
+
+if(filename.endswith('.zip')):
+    with zipfile.ZipFile(selected_data) as z:
+        file_names = z.namelist()
+        print("ZIP içindeki dosyalar:", file_names)
+
+        # İlk .dcm dosyasını bul
+        dcm_files = [f for f in file_names if f.endswith('.dcm')]
+        if not dcm_files:
+            print("ZIP içinde DICOM dosyası bulunamadı!")
+            exit()
+        
+        dcm_file_name = dcm_files[0] 
+        print(f"DICOM dosyası okunuyor: {dcm_file_name}")
+        
+        with z.open(dcm_file_name) as dcm_data:
+            dicom = pydicom.dcmread(BytesIO(dcm_data.read()))
+            print("DICOM başarıyla yüklendi!")
+        image = dicom.pixel_array.astype(np.float32)
+        
+        # Boyut kontrolü: Eğer 3D ise orta slice'i al
+        if len(image.shape) == 3:
+            image = image[image.shape[0] // 2]  # Orta slice
+        
+        image = (image - image.min()) / (image.max() - image.min())
+        input_tensor = torch.randn(1, 3, 224, 224)
+        image = cv2.resize(image, (224, 224))
+
+    # grayscale → 5 channel (SegResNet expects in_channels=5)
+    image = np.stack([image, image, image, image, image], axis=-1)
+
+    # tensor
+    input_tensor = torch.tensor(image).permute(2, 0, 1).float().unsqueeze(0)
+
+    seg_mask = np.ones((224, 224), dtype=np.uint8)  # DICOM senaryosu için tüm alan
+    targets = [SemanticSegmentationTarget(0, seg_mask)]
+
+    target_layers = get_target_layers(model)
+    cam = GradCAM(model=model, target_layers=target_layers)
+    grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
+    cam_map = grayscale_cam[0]
+    with torch.no_grad():
+        output = model(input_tensor)
+        probabilities = torch.sigmoid(output)
+        if probabilities.numel() == 1:
+            confidence = float(probabilities.item() * 100)
+        else:
+            confidence = float(torch.mean(probabilities).item() * 100)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    img_plot = ax.imshow(image)
+    cam_plot = ax.imshow(cam_map, cmap="jet", alpha=0.5)
+    ax.set_title(f"GradCAM - Model Güveni: %{confidence:.2f}")
+
+    cbar = fig.colorbar(cam_plot, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label('Aktivasyon Yoğunluğu (Modelin Odak Noktası)')
+
+    plt.axis('off')
+    plt.show()
+
+elif(filename.endswith('.npz')):
+    with np.load(selected_data) as data:
+        raw_image = data['images'] if 'images' in data else data['arr_0']
+        raw_mask = data['masks'] if 'masks' in data else data['arr_1']
+        
+        print(f"Tespit Edilen Boyutlar: Image {raw_image.shape}, Mask {raw_mask.shape}")
+
+        # --- 4D/3D VERİDEN TEK BİR KESİT SEÇME ---
+        # Image (8, 5, 192, 192) ise: 
+        # Önce orta batch'i (4), sonra o batch'in orta kanalını (2) alalım
+        if raw_image.ndim == 4:
+            selected_raw_img = raw_image[raw_image.shape[0] // 2, raw_image.shape[1] // 2]
+        elif raw_image.ndim == 3:
+            selected_raw_img = raw_image[raw_image.shape[0] // 2]
+        else:
+            selected_raw_img = raw_image
+
+        # Maske (8, 192, 192) ise:
+        if raw_mask.ndim == 3:
+            selected_raw_mask = raw_mask[raw_mask.shape[0] // 2]
+        else:
+            selected_raw_mask = raw_mask
+
+        # --- RESIZE İŞLEMİ ---
+        # Artık elimizde kesinlikle (H, W) formatında 2D bir dizi var
+        image_2d = cv2.resize(selected_raw_img.astype(np.float32), (224, 224))
+        mask_2d = cv2.resize(selected_raw_mask.astype(np.float32), (224, 224))
+
+        # Normalizasyon
+        image = (image_2d - image_2d.min()) / (image_2d.max() - image_2d.min() + 1e-8)
+        mask = mask_2d
+
+    image_5ch = np.stack([image] * 5, axis=-1)
+    input_tensor = torch.from_numpy(image_5ch).permute(2, 0, 1).float().unsqueeze(0)
+    
+    seg_mask = (mask > 0.5).astype(np.uint8)
+    '''
+    class MultiSliceSegmentationTarget:
+        def __init__(self, category):
+            self.category = category
+
+        def __call__(self, model_output):
+            # model_output: [Batch, Channels, H, W]
+            # Sadece belirli pikseller yerine o kanalın (nodül kanalı) 
+            # tüm spatial aktivasyonunu hedef alıyoruz. 
+            # Bu, modelin 5 kanaldan gelen ortak kontrastı toplamasını sağlar.
+            return model_output[:, self.category, :, :].sum()
+
+    # Kullanımı:
+    targets = [MultiSliceSegmentationTarget(category=0)]
+    #targets = [SemanticSegmentationTarget(0, seg_mask)]
+    '''
+    class MultiSliceSegmentationTarget:
+        def __init__(self, category):
+            self.category = category
+
+        def __call__(self, model_output):
+            # model_output: [Batch, Channel, H, W]
+            # Önce ilgili kanalı seçiyoruz
+            if len(model_output.shape) == 4:
+                target = model_output[0, self.category, :, :]
+            else:
+                target = model_output[self.category, :, :]
+            
+            # Sadece pozitif aktivasyonları (ReLU) al ve toplam skoru döndür
+            # Bu skor scalar (tek bir sayı) olmalı ki Grad-CAM geriye doğru akabilsin
+            return torch.sum(torch.relu(target))
+        # 1. Target Layers: SegResNet'in son convolution katmanına odaklanalım
+    target_layers = [model.conv_final] # En doğru anatomik doluluk buradan gelir
+
+    # 2. Grad-CAM++ Tanımla
+    cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
+
+    # 3. Target: Tüm alana odaklanan hedefi ver
+    targets = [MultiSliceSegmentationTarget(category=0)]
+
+    # 4. Hesapla
+    grayscale_cam = cam(input_tensor=input_tensor, targets=targets)[0]
+
+    # --- Bonus: Köşeleri Yumuşatıp İçini Doldurma (Gaussian Blur) ---
+    # Eğer hala çok keskin köşeler görüyorsan, aktivasyon haritasına hafif bir blur atabilirsin
+    grayscale_cam = cv2.GaussianBlur(grayscale_cam, (7, 7), 0)
+    grayscale_cam = (grayscale_cam - grayscale_cam.min()) / (grayscale_cam.max() - grayscale_cam.min() + 1e-8)
+    
+    # Grad-CAM Hesapla
+    '''
+    target_layers = get_target_layers(model)
+    cam = GradCAM(model=model, target_layers=target_layers)
+    grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
+    '''
+    # Grad-CAM Hesapla
+    grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
+    
+    # grayscale_cam zaten (batch, H, W) döner. İlk elemanı alalım.
+    cam_map = grayscale_cam[0] 
+
+    # Reshape hatasını önlemek için güvenli kontrol
+    if cam_map.ndim != 2:
+        side = int(np.sqrt(cam_map.size))
+        # Eğer tam kare değilse (örn: 224), orijinal giriş boyutuna (224, 224) zorla
+        if side * side != cam_map.size:
+            cam_map = cv2.resize(cam_map.reshape(1, -1), (224, 224))
+        else:
+            cam_map = cam_map.reshape((side, side))
+
+    # Boyutu giriş görüntüsüyle eşitle (SegResNet çıktı boyutu farklı olabilir)
+    cam_map = cv2.resize(cam_map, (224, 224))
+    # 1. Grad-CAM haritasını 0-1 arasına normalize et
+    cam_map_norm = (cam_map - cam_map.min()) / (cam_map.max() - cam_map.min() + 1e-8)
+    cam_map_norm = 1.0 - cam_map_norm
+
+    # 2. Özel Dereceli Colormap Oluşturma
+    n_colors = 256
+    base_cmap = plt.cm.jet
+    color_array = base_cmap(np.linspace(0, 1, n_colors))
+
+    # 3. Alpha (Şeffaflık) Kanalını Yoğunluğa Göre Ayarla
+    threshold = 0.3  # Bu değerin altı tamamen şeffaf kalacak
+    alphas = np.zeros(n_colors)
+
+    # Threshold üzerindeki değerler için lineer artan şeffaflık (0.0'dan 0.8'e kadar)
+    # Böylece en yoğun (kırmızı) yerler daha opak, kenarlar daha hayaletimsi olur
+    mask_indices = np.linspace(0, 1, n_colors) > threshold
+    alphas[mask_indices] = np.linspace(0.1, 0.8, np.sum(mask_indices))
+
+    color_array[:, -1] = alphas  # Alpha kanalını renk dizisine ekle
+    grad_cmap = mcolors.ListedColormap(color_array)
+
+    with torch.no_grad():
+        output = model(input_tensor)
+        probabilities = torch.sigmoid(output)
+        
+        if probabilities.numel() == 1:
+            confidence = float(probabilities.item() * 100)
+        else:
+            # Maske tahmini: Olasılığı 0.5'ten büyük olan pikseller (Nodül alanı)
+            predicted_mask = probabilities > 0.5
+            
+            if predicted_mask.sum() > 0:
+                # Sadece nodül olarak tahmin edilen piksellerin ortalama güvenini al
+                confidence = float(torch.mean(probabilities[predicted_mask]).item() * 100)
+            else:
+                # Eğer model hiçbir yeri nodül olarak bulamadıysa, en şüphelendiği pikselin değerini göster
+                confidence = float(torch.max(probabilities).item() * 100)
+
+    # Yan yana 3 panel oluştur
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+    # --- PANEL 1: Sadece Orijinal Görüntü ---
+    axes[0].imshow(image, cmap='gray')
+    axes[0].set_title("Orijinal Kesit (NPZ)")
+
+    # --- PANEL 2: Görüntü + Gerçek Maske (Nodülün Yeri) ---
+    axes[1].imshow(image, cmap='gray')
+    # Maskeyi yarı saydam kırmızı (Reds) olarak üzerine bindir
+    axes[1].imshow(mask, cmap='Reds', alpha=0.4) 
+    axes[1].set_title("Gerçek Maske (Ground Truth)")
+
+    # --- PANEL 3: Görüntü + Grad-CAM (Modelin Kararı) ---
+    axes[2].imshow(image, cmap='gray')
+    cam_plot = axes[2].imshow(cam_map_norm, cmap=grad_cmap, alpha=0.6)
+    axes[2].set_title(f"Grad-CAM (Güven: %{confidence:.2f})")
+
+    # Renk çubuğu ekle
+    fig.colorbar(cam_plot, ax=axes[2], fraction=0.046, pad=0.04)
+
+    for ax in axes:
+        ax.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+else:
+    print("Desteklenmeyen dosya formatı!.")
