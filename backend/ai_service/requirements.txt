@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+torch
+pydicom
+numpy
+huggingface_hub
+Pillow
+scipy
+scikit-image

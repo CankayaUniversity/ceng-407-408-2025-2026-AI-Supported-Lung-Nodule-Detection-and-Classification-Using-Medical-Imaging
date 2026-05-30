@@ -32,3 +32,6 @@ backend/uploads/*
 !backend/uploads/.gitkeep
 
 lung25demo/
+
+# AI service model weights and cache (large binary files, downloaded from HuggingFace)
+backend/ai_service/model/

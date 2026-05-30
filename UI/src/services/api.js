@@ -95,4 +95,13 @@ export const activityLogAPI = {
   getRecent: (hours = 24) => api.get(`/activity-logs/recent?hours=${hours}`),
 };
 
+// AI Service API
+export const aiAPI = {
+  getStatus: () => api.get('/ai/status'),
+  downloadModel: () => api.post('/ai/download'),
+  analyzeStudy: (studyId) => api.post(`/ai/analyze/${studyId}`),
+  exportNodule3D: (noduleId) => api.post(`/nodules/${noduleId}/export-3d`),
+  getGroundTruth: (studyId) => api.get(`/ai/ground-truth/${studyId}`),
+};
+
 export default api;

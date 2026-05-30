@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './NewStudy.css';
-import { patientAPI, studyAPI, dicomAPI } from '../services/api';
+import { patientAPI, studyAPI, dicomAPI, aiAPI } from '../services/api';
 import { parseDicomMetadata, loadDicomFromFile, cornerstone } from '../utils/dicomUtils';
 
 function NewStudy() {
@@ -24,6 +24,68 @@ function NewStudy() {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(0);
   const [previewLoaded, setPreviewLoaded] = useState(false);
+  // AI model state
+  const [modelStatus, setModelStatus] = useState('unknown'); // 'unknown'|'not_downloaded'|'downloading'|'ready'
+  const modelPollRef = useRef(null);
+
+  // Check model status on mount and poll during download
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const res = await aiAPI.getStatus();
+        const data = res.data;
+        if (data.downloaded) {
+          setModelStatus('ready');
+          stopPolling();
+        } else if (data.download_status?.status === 'downloading') {
+          setModelStatus('downloading');
+        } else if (data.available === false) {
+          setModelStatus('service_offline');
+        } else {
+          setModelStatus('not_downloaded');
+        }
+      } catch {
+        setModelStatus('service_offline');
+      }
+    };
+
+    checkStatus();
+    return () => stopPolling();
+  }, []);
+
+  const stopPolling = () => {
+    if (modelPollRef.current) {
+      clearInterval(modelPollRef.current);
+      modelPollRef.current = null;
+    }
+  };
+
+  const handleDownloadModel = async () => {
+    try {
+      setModelStatus('downloading');
+      await aiAPI.downloadModel();
+      // Poll until complete
+      modelPollRef.current = setInterval(async () => {
+        try {
+          const res = await aiAPI.getStatus();
+          const data = res.data;
+          if (data.downloaded) {
+            setModelStatus('ready');
+            stopPolling();
+          } else if (data.download_status?.status === 'error') {
+            setModelStatus('not_downloaded');
+            stopPolling();
+            alert('Download failed: ' + data.download_status.message);
+          }
+        } catch {
+          // service offline during download - keep polling
+        }
+      }, 2000);
+    } catch {
+      setModelStatus('service_offline');
+      alert('AI service is not running. Please start the AI service first (start.bat).');
+    }
+  };
 
   const handleInputChange = (e) => {
     setFormData({...formData, [e.target.name]: e.target.value});
@@ -246,32 +308,35 @@ function NewStudy() {
     setProgress(0);
 
     try {
-      // Upload DICOM files if available
+      // Upload DICOM files
       setProgress(10);
       if (dicomFiles.length > 0) {
         console.log('Uploading DICOM files...', dicomFiles.length);
         await dicomAPI.uploadFiles(newStudyId, dicomFiles);
-        console.log('DICOM files uploaded successfully');
-      } else {
-        console.log('No DICOM files to upload');
+        console.log('DICOM files uploaded');
       }
       setProgress(40);
 
-      // Simulate AI analysis
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setProgress(70);
-
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setProgress(90);
-
-      // Update study status
-      const noduleCount = Math.floor(Math.random() * 5) + 1; // Mock nodule count
-      await studyAPI.updateStatus(newStudyId, 'completed', noduleCount);
-      
-      setProgress(100);
+      if (modelStatus === 'ready' && dicomFiles.length > 0) {
+        // Real AI analysis
+        setProgress(50);
+        console.log('Starting real Pulmo analysis...');
+        await aiAPI.analyzeStudy(newStudyId);
+        setProgress(100);
+      } else {
+        // Fallback: mock analysis
+        console.log('Using mock analysis (Pulmo not available)');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        setProgress(70);
+        await new Promise(resolve => setTimeout(resolve, 800));
+        setProgress(90);
+        const noduleCount = Math.floor(Math.random() * 5) + 1;
+        await studyAPI.updateStatus(newStudyId, 'completed', noduleCount);
+        setProgress(100);
+      }
     } catch (error) {
       console.error('Error during analysis:', error);
-      alert('Failed to process study. Please try again.');
+      alert('Failed to process study: ' + (error.response?.data?.error || error.message));
       setIsProcessing(false);
       setProgress(0);
     }
@@ -433,10 +498,32 @@ function NewStudy() {
           {/* Analysis Section */}
           <div className="dashboard-section">
             <h3>AI Analysis</h3>
+
+            {/* Model Status / Download */}
+            <div className="model-status-bar">
+              {modelStatus === 'ready' && (
+                <span className="model-badge ready">Pulmo Ready</span>
+              )}
+              {modelStatus === 'not_downloaded' && (
+                <button className="download-pulmo-btn" onClick={handleDownloadModel}>
+                  Download Pulmo (42 MB)
+                </button>
+              )}
+              {modelStatus === 'downloading' && (
+                <span className="model-badge downloading">
+                  <span className="spinner small"></span>
+                  Downloading Pulmo...
+                </span>
+              )}
+              {modelStatus === 'service_offline' && (
+                <span className="model-badge offline">AI Service Offline</span>
+              )}
+            </div>
+
             <div className="analysis-controls">
-              <button 
-                className="start-analysis-btn" 
-                onClick={startAnalysis} 
+              <button
+                className="start-analysis-btn"
+                onClick={startAnalysis}
                 disabled={isProcessing || (!formData.patientID || !formData.nameSurname)}
               >
                 {isProcessing ? (
@@ -444,11 +531,13 @@ function NewStudy() {
                     <span className="spinner"></span>
                     Processing... ({progress}%)
                   </>
+                ) : modelStatus === 'ready' ? (
+                  <>Start AI Analysis (Pulmo)</>
                 ) : (
                   <>Start AI Analysis</>
                 )}
               </button>
-              
+
               {(!formData.patientID || !formData.nameSurname) && !isProcessing && (
                 <p className="analysis-hint">Fill in Patient ID and Name to start analysis</p>
               )}

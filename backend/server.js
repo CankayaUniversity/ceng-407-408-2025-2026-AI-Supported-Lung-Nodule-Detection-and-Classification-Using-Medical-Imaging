@@ -3,8 +3,33 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import http from 'http';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+
+// http.request wrapper — no internal timeout, works for long AI analyses
+function httpPost(url, data) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(data);
+    const u = new URL(url);
+    const req = http.request(
+      { hostname: u.hostname, port: u.port || 80, path: u.pathname, method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+      (res) => {
+        let raw = '';
+        res.on('data', c => raw += c);
+        res.on('end', () => {
+          res.ok   = res.statusCode >= 200 && res.statusCode < 300;
+          res.json = () => JSON.parse(raw);
+          resolve(res);
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
 
 // Load environment variables
 dotenv.config();
@@ -48,6 +73,8 @@ import {
   getReportsByUser,
   deleteReport
 } from './database.js';
+
+const AI_SERVICE_URL = 'http://localhost:3002';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -663,6 +690,120 @@ app.delete('/api/reports/:id', async (req, res) => {
       return res.status(404).json({ error: 'Report not found' });
     }
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ AI SERVICE PROXY ROUTES ============
+
+app.get('/api/ai/status', async (req, res) => {
+  try {
+    const response = await fetch(`${AI_SERVICE_URL}/status`);
+    const data = await response.json();
+    res.json(data);
+  } catch {
+    res.json({ downloaded: false, available: false, message: 'AI service not running' });
+  }
+});
+
+app.post('/api/ai/download', async (req, res) => {
+  try {
+    const response = await fetch(`${AI_SERVICE_URL}/download`, { method: 'POST' });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(503).json({ error: 'AI service not available', message: error.message });
+  }
+});
+
+app.post('/api/ai/analyze/:studyId', async (req, res) => {
+  try {
+    const { studyId } = req.params;
+    const study = await getStudy(studyId);
+    if (!study) return res.status(404).json({ error: 'Study not found' });
+
+    const dicomFolder = path.join(uploadsDir, studyId);
+
+    // Use http.request instead of fetch — avoids undici's internal headersTimeout
+    // which fires after 300s regardless of AbortController settings.
+    const aiResponse = await httpPost(`${AI_SERVICE_URL}/analyze`,
+      { study_id: studyId, dicom_folder: dicomFolder });
+
+    if (!aiResponse.ok) {
+      const err = aiResponse.json();
+      return res.status(aiResponse.statusCode).json({ error: err.detail || 'Analysis failed' });
+    }
+
+    const result = aiResponse.json();
+
+    // Remove previous AI nodules, save new ones
+    await deleteNodulesByStudy(studyId);
+    for (const n of result.nodules) {
+      await saveNodule({
+        study_id: studyId,
+        nodule_number: n.nodule_number,
+        location: n.location,
+        size_mm: n.size_mm,
+        risk_level: n.risk_level,
+        coordinates: JSON.stringify(n.coordinates_pct),
+        slice_index: n.center_voxel.z,
+        probability: n.malignancy_prob,
+        all_slice_indices: JSON.stringify(n.all_slice_indices),
+        concept_scores: JSON.stringify(n.concept_scores),
+        center_voxel: JSON.stringify(n.center_voxel),
+        mask_paths: JSON.stringify(n.mask_paths),
+        detection_prob: n.detection_prob,
+      });
+    }
+
+    await updateStudyStatus(studyId, 'completed', result.nodules.length);
+    res.json({ success: true, noduleCount: result.nodules.length, nodules: result.nodules });
+  } catch (error) {
+    console.error('AI analyze error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/ai/ground-truth/:studyId', async (req, res) => {
+  try {
+    const { studyId } = req.params;
+    const dicomFolder = path.join(uploadsDir, studyId);
+    const aiResponse = await fetch(`${AI_SERVICE_URL}/ground-truth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dicom_folder: dicomFolder }),
+    });
+    const data = await aiResponse.json();
+    if (!aiResponse.ok) return res.status(aiResponse.status).json({ error: data.detail });
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/nodules/:id/export-3d', async (req, res) => {
+  try {
+    const nodule = await getNodule(parseInt(req.params.id));
+    if (!nodule) return res.status(404).json({ error: 'Nodule not found' });
+
+    const dicomFolder = path.join(uploadsDir, nodule.study_id);
+    const centerVoxel = nodule.center_voxel ? JSON.parse(nodule.center_voxel) : { z: nodule.slice_index || 0, y: 256, x: 256 };
+
+    const aiResponse = await fetch(`${AI_SERVICE_URL}/export-nodule-3d`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        study_id: nodule.study_id,
+        nodule_id: nodule.id,
+        center_voxel: centerVoxel,
+        dicom_folder: dicomFolder,
+      }),
+    });
+
+    const data = await aiResponse.json();
+    if (!aiResponse.ok) return res.status(500).json({ error: data.detail });
+    res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

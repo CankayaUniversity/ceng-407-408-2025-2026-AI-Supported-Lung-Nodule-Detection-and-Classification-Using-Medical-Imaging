@@ -170,6 +170,11 @@ async function createTables() {
         notes NVARCHAR(MAX),
         include_in_report BIT DEFAULT 1,
         reviewed BIT DEFAULT 0,
+        all_slice_indices NVARCHAR(MAX),
+        concept_scores NVARCHAR(MAX),
+        center_voxel NVARCHAR(500),
+        mask_paths NVARCHAR(MAX),
+        detection_prob FLOAT,
         created_at DATETIME DEFAULT GETDATE(),
         CONSTRAINT FK_nodules_study FOREIGN KEY (study_id) REFERENCES studies(study_id) ON DELETE CASCADE
       )
@@ -268,6 +273,26 @@ async function createTables() {
     await pool.request().query(`
       IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('nodules') AND name = 'reviewed')
       ALTER TABLE nodules ADD reviewed BIT DEFAULT 0
+    `);
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('nodules') AND name = 'all_slice_indices')
+      ALTER TABLE nodules ADD all_slice_indices NVARCHAR(MAX)
+    `);
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('nodules') AND name = 'concept_scores')
+      ALTER TABLE nodules ADD concept_scores NVARCHAR(MAX)
+    `);
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('nodules') AND name = 'center_voxel')
+      ALTER TABLE nodules ADD center_voxel NVARCHAR(500)
+    `);
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('nodules') AND name = 'mask_paths')
+      ALTER TABLE nodules ADD mask_paths NVARCHAR(MAX)
+    `);
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('nodules') AND name = 'detection_prob')
+      ALTER TABLE nodules ADD detection_prob FLOAT
     `);
 
     await pool.request().query(`
@@ -496,7 +521,11 @@ export async function getDicomFilesByStudy(studyId) {
 }
 
 export async function saveNodule(noduleData) {
-  const { study_id, nodule_number, location, size_mm, risk_level, coordinates, slice_index, probability, doctor_assessment, notes, include_in_report, reviewed } = noduleData;
+  const {
+    study_id, nodule_number, location, size_mm, risk_level, coordinates,
+    slice_index, probability, doctor_assessment, notes, include_in_report, reviewed,
+    all_slice_indices, concept_scores, center_voxel, mask_paths, detection_prob
+  } = noduleData;
   const result = await pool.request()
     .input('study_id', sql.NVarChar, study_id)
     .input('nodule_number', sql.Int, nodule_number)
@@ -510,10 +539,15 @@ export async function saveNodule(noduleData) {
     .input('notes', sql.NVarChar, notes || null)
     .input('include_in_report', sql.Bit, include_in_report !== false ? 1 : 0)
     .input('reviewed', sql.Bit, reviewed ? 1 : 0)
+    .input('all_slice_indices', sql.NVarChar, all_slice_indices || null)
+    .input('concept_scores', sql.NVarChar, concept_scores || null)
+    .input('center_voxel', sql.NVarChar, center_voxel || null)
+    .input('mask_paths', sql.NVarChar, mask_paths || null)
+    .input('detection_prob', sql.Float, detection_prob || null)
     .query(`
-      INSERT INTO nodules (study_id, nodule_number, location, size_mm, risk_level, coordinates, slice_index, probability, doctor_assessment, notes, include_in_report, reviewed)
+      INSERT INTO nodules (study_id, nodule_number, location, size_mm, risk_level, coordinates, slice_index, probability, doctor_assessment, notes, include_in_report, reviewed, all_slice_indices, concept_scores, center_voxel, mask_paths, detection_prob)
       OUTPUT INSERTED.id
-      VALUES (@study_id, @nodule_number, @location, @size_mm, @risk_level, @coordinates, @slice_index, @probability, @doctor_assessment, @notes, @include_in_report, @reviewed)
+      VALUES (@study_id, @nodule_number, @location, @size_mm, @risk_level, @coordinates, @slice_index, @probability, @doctor_assessment, @notes, @include_in_report, @reviewed, @all_slice_indices, @concept_scores, @center_voxel, @mask_paths, @detection_prob)
     `);
   return result.recordset[0].id;
 }

@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import './Review.css';
-import { studyAPI, noduleAPI } from '../services/api';
+import { studyAPI, noduleAPI, aiAPI } from '../services/api';
 import { cornerstone, displayDicomImage, enableImageTools, resetViewport, cornerstoneWADOImageLoader } from '../utils/dicomUtils';
+import NoduleViewer3D from '../components/NoduleViewer3D';
 
 const API_URL = 'http://localhost:3001/api';
 
@@ -14,24 +15,45 @@ const WINDOW_PRESETS = {
   soft: { ww: 400, wc: 40, name: 'Soft Tissue' }
 };
 
-// XAI explanation templates based on risk level
+// Fallback XAI templates (used when model concept scores are unavailable)
 const XAI_EXPLANATIONS = {
   high: [
-    { feature: 'Irregular margins', confidence: 0.89 },
-    { feature: 'Spiculated appearance', confidence: 0.82 },
-    { feature: 'Solid density pattern', confidence: 0.78 },
-    { feature: 'Size > 8mm', confidence: 0.95 }
+    { feature: 'Spiculation', confidence: 0.89 },
+    { feature: 'Margin', confidence: 0.82 },
+    { feature: 'Texture', confidence: 0.78 },
+    { feature: 'Lobulation', confidence: 0.75 }
   ],
   medium: [
-    { feature: 'Part-solid pattern', confidence: 0.72 },
-    { feature: 'Lobulated margins', confidence: 0.68 },
-    { feature: 'Ground-glass component', confidence: 0.65 }
+    { feature: 'Lobulation', confidence: 0.72 },
+    { feature: 'Margin', confidence: 0.68 },
+    { feature: 'Texture', confidence: 0.65 }
   ],
   low: [
-    { feature: 'Smooth margins', confidence: 0.85 },
-    { feature: 'Calcification present', confidence: 0.72 },
-    { feature: 'Stable size', confidence: 0.90 }
+    { feature: 'Calcification', confidence: 0.85 },
+    { feature: 'Sphericity', confidence: 0.72 },
+    { feature: 'Subtlety', confidence: 0.68 }
   ]
+};
+
+// Human-readable concept labels for XAI display
+const CONCEPT_LABELS = {
+  subtlety: 'Subtlety',
+  internalStructure: 'Internal Structure',
+  calcification: 'Calcification',
+  sphericity: 'Sphericity',
+  margin: 'Margin Sharpness',
+  lobulation: 'Lobulation',
+  spiculation: 'Spiculation',
+  texture: 'Texture',
+};
+
+const buildXaiExplanations = (nodule) => {
+  if (nodule.conceptScores && Object.keys(nodule.conceptScores).length > 0) {
+    return Object.entries(nodule.conceptScores)
+      .map(([key, val]) => ({ feature: CONCEPT_LABELS[key] || key, confidence: val }))
+      .sort((a, b) => b.confidence - a.confidence);
+  }
+  return XAI_EXPLANATIONS[nodule.risk] || XAI_EXPLANATIONS.low;
 };
 
 export default function Review(){
@@ -40,6 +62,7 @@ export default function Review(){
   const viewerRef = useRef(null);
   const viewerInitialized = useRef(false);
   const dicomFilesRef = useRef([]);
+  const viewportTimerRef = useRef(null);
   
   // Core state
   const [study, setStudy] = useState(null);
@@ -98,10 +121,19 @@ export default function Review(){
   // Nodule state
   const [nodules, setNodules] = useState([]);
   const [selectedNodule, setSelectedNodule] = useState(0);
+
+  // Ground truth state
+  const [gtNodules, setGtNodules] = useState([]);
+  const [gtSpacing, setGtSpacing] = useState({ sliceThickness: 1.0, pixelSpacing: 0.664 });
+  const [showGT, setShowGT] = useState(false);
   
   // Report state
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportGenerating, setReportGenerating] = useState(false);
+  // 3D viewer state
+  const [viewer3DNodule, setViewer3DNodule] = useState(null);
+  // Viewport version — increments on every cornerstone render, triggers overlay recalculation
+  const [viewportVersion, setViewportVersion] = useState(0);
 
   // Debug: Log state changes
   useEffect(() => {
@@ -111,6 +143,30 @@ export default function Review(){
   useEffect(() => {
     loadStudyData();
   }, [studyId]);
+
+  useEffect(() => {
+    if (!studyId) return;
+    aiAPI.getGroundTruth(studyId)
+      .then(res => {
+        const MIN_MM = 5.5;
+        setGtNodules((res.data.ground_truth || []).filter(g => g.diameter_mm >= MIN_MM));
+        setGtSpacing({
+          sliceThickness: res.data.slice_thickness_mm || 1.0,
+          pixelSpacing: res.data.pixel_spacing_mm || 0.664,
+        });
+      })
+      .catch(() => setGtNodules([]));
+  }, [studyId]);
+
+  // Debug mode: expose window.debug() to toggle GT overlay from browser console
+  useEffect(() => {
+    window.debug = () => setShowGT(prev => {
+      const next = !prev;
+      console.log('[Pulmo] GT debug mode:', next ? 'ON' : 'OFF');
+      return next;
+    });
+    return () => { delete window.debug; };
+  }, []);
 
   // Preload all DICOM images for smooth scrolling
   useEffect(() => {
@@ -338,6 +394,118 @@ export default function Review(){
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentImageIndex, dicomFiles.length]);
 
+  // Listen to cornerstone viewport changes (zoom, pan, new image) → recalculate overlays.
+  // Debounced: zoom animations fire IMAGE_RENDERED many times per second; without
+  // debouncing each intermediate frame gets a different position, causing circles to
+  // visually accumulate. 60ms settles after the animation finishes.
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el || !viewerReady) return;
+    const bump = () => {
+      if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current);
+      viewportTimerRef.current = setTimeout(() => setViewportVersion(v => v + 1), 60);
+    };
+    el.addEventListener(cornerstone.EVENTS.IMAGE_RENDERED, bump);
+    return () => {
+      el.removeEventListener(cornerstone.EVENTS.IMAGE_RENDERED, bump);
+      if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current);
+    };
+  }, [viewerReady]);
+
+  // Convert image pixel coords → canvas pixel coords (respects zoom & pan).
+  // pixelToCanvas returns coords relative to the dicom-viewer element; overlays are
+  // positioned relative to viewer-wrapper (offsetParent). We add the element's own
+  // offsetLeft/offsetTop to bridge that gap (non-zero when flexbox centers the viewer).
+  const imgToCanvas = useCallback((ix, iy) => {
+    if (!viewerRef.current) return null;
+    try {
+      const pt = cornerstone.pixelToCanvas(viewerRef.current, { x: ix, y: iy });
+      pt.x += viewerRef.current.offsetLeft;
+      pt.y += viewerRef.current.offsetTop;
+      return pt;
+    }
+    catch { return null; }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewportVersion]);
+
+  // Circle style for a GT nodule at the current slice.
+  // Radius shrinks as a sphere cross-section: r(dz) = sqrt(R² - dz²)
+  const getGTCircleStyle = useCallback((gt, sliceIndex) => {
+    try {
+      const R_mm = gt.diameter_mm / 2;
+      const dz_mm = Math.abs(sliceIndex - gt.slice_index) * gtSpacing.sliceThickness;
+      const r_mm = Math.sqrt(Math.max(0, R_mm * R_mm - dz_mm * dz_mm));
+      if (r_mm < 0.5) return null;
+      const r_px_img = r_mm / gtSpacing.pixelSpacing; // radius in image pixels
+      const center = imgToCanvas(gt.pixel_x, gt.pixel_y);
+      const edgePt = imgToCanvas(gt.pixel_x + r_px_img, gt.pixel_y);
+      if (!center || !edgePt) return null;
+      const r = Math.max(4, edgePt.x - center.x);
+      return {
+        center,
+        r,
+        style: {
+          position: 'absolute',
+          left: `${center.x - r}px`,
+          top: `${center.y - r}px`,
+          width: `${r * 2}px`,
+          height: `${r * 2}px`,
+          border: '2px solid #00e676',
+          borderRadius: '50%',
+          pointerEvents: 'none',
+          boxSizing: 'border-box',
+        },
+      };
+    } catch { return null; }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imgToCanvas, gtSpacing]);
+
+  // Position style for the 64×64 patch mask PNG
+  const getPatchStyle = useCallback((nodule) => {
+    let ix, iy;
+    if (nodule.centerVoxel) {
+      ix = nodule.centerVoxel.x;
+      iy = nodule.centerVoxel.y;
+    } else {
+      // Fallback: derive image coords from percentage coordinates
+      try {
+        const ee = cornerstone.getEnabledElement(viewerRef.current);
+        if (!ee?.image) return null;
+        ix = (nodule.coordinates?.x ?? 50) / 100 * ee.image.width;
+        iy = (nodule.coordinates?.y ?? 50) / 100 * ee.image.height;
+      } catch { return null; }
+    }
+    const tl = imgToCanvas(ix - 32, iy - 32);
+    const br = imgToCanvas(ix + 32, iy + 32);
+    if (!tl || !br) return null;
+    return {
+      position: 'absolute',
+      left:   `${tl.x}px`,
+      top:    `${tl.y}px`,
+      width:  `${Math.max(8, br.x - tl.x)}px`,
+      height: `${Math.max(8, br.y - tl.y)}px`,
+      pointerEvents: 'none',
+    };
+  }, [imgToCanvas]);
+
+  // Position style for nodule circle marker — follows zoom & pan
+  const getMarkerStyle = useCallback((nodule) => {
+    try {
+      const ee = cornerstone.getEnabledElement(viewerRef.current);
+      if (!ee?.image) throw new Error('no image');
+      const ix = (nodule.coordinates?.x ?? 50) / 100 * ee.image.width;
+      const iy = (nodule.coordinates?.y ?? 50) / 100 * ee.image.height;
+      const c = cornerstone.pixelToCanvas(viewerRef.current, { x: ix, y: iy });
+      return { left: `${c.x}px`, top: `${c.y}px` };
+    } catch {
+      return {
+        left: `${nodule.coordinates?.x ?? 50}%`,
+        top:  `${nodule.coordinates?.y ?? 50}%`,
+      };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewportVersion]);
+
   const loadStudyData = async () => {
     try {
       setLoading(true);
@@ -372,28 +540,80 @@ export default function Review(){
           console.log('No DICOM files found for this study');
         }
 
-        // Generate enhanced nodules with XAI data
-        const noduleCount = studyData.nodule_count || 0;
-        const locations = ['RUL', 'LUL', 'RML', 'RLL', 'LLL'];
-        const mockNodules = Array.from({ length: noduleCount }, (_, i) => {
-          const risk = i < noduleCount / 3 ? 'high' : i < noduleCount * 2 / 3 ? 'medium' : 'low';
-          return {
-            id: i + 1,
-            location: locations[i % 5],
-            locationFull: getLocationFullName(locations[i % 5]),
-            size: (6 + i * 2.5).toFixed(1),
-            probability: (0.65 + Math.random() * 0.3).toFixed(2),
-            risk: risk,
-            sliceIndex: Math.floor(Math.random() * (studyData.dicomFiles?.length || 1)),
-            reviewed: false,
-            includeInReport: true,
-            notes: '',
-            doctorAssessment: '',
-            xaiExplanations: XAI_EXPLANATIONS[risk],
-            coordinates: { x: 45 + Math.random() * 10, y: 40 + Math.random() * 20 }
-          };
-        });
-        setNodules(mockNodules);
+        // Load nodules: prefer real DB nodules, fall back to mock
+        const dbNodules = studyData.nodules || [];
+        let loadedNodules;
+
+        if (dbNodules.length > 0) {
+          // Real nodules from DB (from Pulmo analysis or prior saves)
+          loadedNodules = dbNodules.map((n, i) => {
+            let coords = { x: 50, y: 50 };
+            try { if (n.coordinates) coords = JSON.parse(n.coordinates); } catch {}
+            let allSliceIndices = n.slice_index !== undefined ? [n.slice_index] : [];
+            try { if (n.all_slice_indices) allSliceIndices = JSON.parse(n.all_slice_indices); } catch {}
+            let conceptScores = null;
+            try { if (n.concept_scores) conceptScores = JSON.parse(n.concept_scores); } catch {}
+            let maskPaths = {};
+            try { if (n.mask_paths) maskPaths = JSON.parse(n.mask_paths); } catch {}
+            let centerVoxel = null;
+            try { if (n.center_voxel) centerVoxel = JSON.parse(n.center_voxel); } catch {}
+
+            const riskKey = (n.risk_level || 'Low').toLowerCase();
+            const noduleObj = {
+              id: n.id,
+              nodule_number: n.nodule_number || i + 1,
+              location: n.location || 'RUL',
+              locationFull: getLocationFullName(n.location || 'RUL'),
+              size: n.size_mm ? parseFloat(n.size_mm).toFixed(1) : '0.0',
+              probability: n.probability || 0,
+              risk: riskKey,
+              sliceIndex: n.slice_index || 0,
+              reviewed: !!n.reviewed,
+              includeInReport: n.include_in_report !== false,
+              notes: n.notes || '',
+              doctorAssessment: n.doctor_assessment || '',
+              coordinates: coords,
+              allSliceIndices,
+              conceptScores,
+              maskPaths,
+              centerVoxel,
+              detectionProb: n.detection_prob || 0,
+            };
+            noduleObj.xaiExplanations = buildXaiExplanations(noduleObj);
+            return noduleObj;
+          });
+        } else {
+          // Mock nodules (no AI analysis yet)
+          const noduleCount = studyData.nodule_count || 0;
+          const locations = ['RUL', 'LUL', 'RML', 'RLL', 'LLL'];
+          loadedNodules = Array.from({ length: noduleCount }, (_, i) => {
+            const risk = i < noduleCount / 3 ? 'high' : i < noduleCount * 2 / 3 ? 'medium' : 'low';
+            const sliceIdx = Math.floor(Math.random() * (studyData.dicomFiles?.length || 1));
+            const noduleObj = {
+              id: i + 1,
+              nodule_number: i + 1,
+              location: locations[i % 5],
+              locationFull: getLocationFullName(locations[i % 5]),
+              size: (6 + i * 2.5).toFixed(1),
+              probability: (0.65 + Math.random() * 0.3).toFixed(2),
+              risk,
+              sliceIndex: sliceIdx,
+              reviewed: false,
+              includeInReport: true,
+              notes: '',
+              doctorAssessment: '',
+              coordinates: { x: 45 + Math.random() * 10, y: 40 + Math.random() * 20 },
+              allSliceIndices: [sliceIdx],
+              conceptScores: null,
+              maskPaths: {},
+              centerVoxel: null,
+              detectionProb: 0,
+            };
+            noduleObj.xaiExplanations = XAI_EXPLANATIONS[risk];
+            return noduleObj;
+          });
+        }
+        setNodules(loadedNodules.filter(n => parseFloat(n.size) >= 5.5));
         
         // Mark study as reviewed when opened
         const userId = localStorage.getItem('userId');
@@ -762,6 +982,7 @@ export default function Review(){
             <div className="toolbar-section">
               <button className={`toolbar-btn ${showSegmentation ? 'active' : ''}`} onClick={() => setShowSegmentation(!showSegmentation)}>Seg</button>
               <button className={`toolbar-btn ${showHeatmap ? 'active' : ''}`} onClick={() => setShowHeatmap(!showHeatmap)}>Heat</button>
+              {/* GT button hidden — debug mode only, toggle via window.debug() in console */}
             </div>
           </div>
 
@@ -777,17 +998,90 @@ export default function Review(){
                 />
                 {imageLoading && <div className="image-loading-overlay"><div className="loading-spinner small"></div></div>}
                 
-                {showSegmentation && nodules.map((nodule, i) => (
-                  nodule.sliceIndex === currentImageIndex && (
-                    <div key={nodule.id} className={`nodule-marker ${nodule.risk} ${selectedNodule === i ? 'selected' : ''}`}
-                      style={{ left: `${nodule.coordinates.x}%`, top: `${nodule.coordinates.y}%` }}
-                      onClick={() => goToNoduleSlice(nodule, i)}>
-                      <span className="marker-label">#{nodule.id}</span>
-                    </div>
-                  )
-                ))}
+                {/* SEG: segmentation mask only — no circle markers */}
+                {showSegmentation && nodules.map((nodule) => {
+                  // Filter: skip if model said "not a nodule"
+                  if (nodule.detectionProb > 0 && nodule.detectionProb <= 0.5) return null;
+                  const allSlices = nodule.allSliceIndices?.length > 0
+                    ? nodule.allSliceIndices : [nodule.sliceIndex];
+                  if (!allSlices.includes(currentImageIndex)) return null;
 
-                {showHeatmap && <div className="heatmap-overlay"><div className="heatmap-gradient" /></div>}
+                  const segPath = nodule.maskPaths?.[`${currentImageIndex}_seg`]
+                    ?? nodule.maskPaths?.[String(currentImageIndex)]; // legacy fallback
+                  const patchStyle = getPatchStyle(nodule);
+                  if (!segPath || !patchStyle) return null;
+
+                  return (
+                    <img
+                      key={`seg-${nodule.id}-${currentImageIndex}`}
+                      src={`http://localhost:3001/uploads/${studyId}/${segPath}`}
+                      style={{ ...patchStyle, objectFit: 'fill' }}
+                      alt=""
+                      draggable={false}
+                    />
+                  );
+                })}
+
+                {/* HEAT: concept-weighted XAI heatmap */}
+                {showHeatmap && (() => {
+                  const hasRealMasks = nodules.some(
+                    n => Object.keys(n.maskPaths || {}).some(k => k.endsWith('_heat'))
+                  );
+                  if (!hasRealMasks) {
+                    return <div className="heatmap-overlay"><div className="heatmap-gradient" /></div>;
+                  }
+                  return nodules.map((nodule) => {
+                    if (nodule.detectionProb > 0 && nodule.detectionProb <= 0.5) return null;
+                    const allSlices = nodule.allSliceIndices?.length > 0
+                      ? nodule.allSliceIndices : [nodule.sliceIndex];
+                    if (!allSlices.includes(currentImageIndex)) return null;
+
+                    const heatPath = nodule.maskPaths?.[`${currentImageIndex}_heat`];
+                    if (!heatPath) return null;
+                    const patchStyle = getPatchStyle(nodule);
+                    if (!patchStyle) return null;
+
+                    return (
+                      <img
+                        key={`heat-${nodule.id}-${currentImageIndex}`}
+                        src={`http://localhost:3001/uploads/${studyId}/${heatPath}`}
+                        style={{ ...patchStyle, objectFit: 'fill' }}
+                        alt=""
+                        draggable={false}
+                      />
+                    );
+                  });
+                })()}
+
+                {/* GT: circles sized to sphere cross-section at each slice */}
+                {showGT && gtNodules.map((gt) => {
+                  if (currentImageIndex < gt.slice_min || currentImageIndex > gt.slice_max) return null;
+                  const hit = getGTCircleStyle(gt, currentImageIndex);
+                  if (!hit) return null;
+                  return (
+                    <React.Fragment key={`gt-${gt.idx}`}>
+                      <div style={hit.style} />
+                      <div style={{
+                        position: 'absolute',
+                        left: `${hit.center.x + hit.r + 4}px`,
+                        top: `${hit.center.y - 9}px`,
+                        color: '#00e676',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                        textShadow: '0 0 4px #000, 0 0 2px #000',
+                        pointerEvents: 'none',
+                      }}>
+                        GT#{gt.idx} {gt.diameter_mm}mm
+                        {gt.hu_center != null && (
+                          <span style={{ fontSize: '10px', opacity: 0.8, marginLeft: 4 }}>
+                            ({gt.hu_center > -100 ? 'solid' : gt.hu_center > -500 ? 'GGO' : 'air'} {gt.hu_center}HU)
+                          </span>
+                        )}
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
 
                 <div className="viewer-overlay">
                   <div className="overlay-top-left"><span>{study.patientName}</span><span>{study.patientID}</span></div>
@@ -826,12 +1120,61 @@ export default function Review(){
         {/* Right Panel - Nodules */}
         <div className="review-right-panel">
               <div className="panel-header"><h3>Nodules ({nodules.length})</h3></div>
+              {showGT && gtNodules.length > 0 && (
+                <div className="gt-comparison-panel">
+                  <div className="gt-comparison-header">
+                    <span style={{ color: '#00e676' }}>GT (LIDC)</span>
+                    <span style={{ color: '#ff9800' }}>Model</span>
+                  </div>
+                  <div className="gt-comparison-table">
+                    {gtNodules.map(gt => {
+                      const matched = nodules.find(n => {
+                        const sliceDiff = Math.abs((n.sliceIndex || 0) - gt.slice_index);
+                        return sliceDiff <= Math.max(3, gt.diameter_mm / 2);
+                      });
+                      return (
+                        <div
+                          key={`gt-row-${gt.idx}`}
+                          className={`gt-row ${matched ? 'gt-matched' : 'gt-missed'}`}
+                          onClick={() => setCurrentImageIndex(gt.slice_index)}
+                          title="Click to jump to this slice"
+                        >
+                          <div className="gt-cell gt-cell-left">
+                            <span className="gt-label">GT#{gt.idx}</span>
+                            <span className="gt-detail">
+                              {gt.diameter_mm}mm · mal={gt.malignancy.toFixed(1)}
+                              {gt.hu_center != null && (
+                                <span style={{ marginLeft: 4, color: gt.hu_center > -100 ? '#fbbf24' : '#60a5fa' }}>
+                                  · {gt.hu_center > -100 ? 'solid' : gt.hu_center > -500 ? 'GGO' : 'air'} {gt.hu_center}HU
+                                </span>
+                              )}
+                            </span>
+                            <span className="gt-slice">slice {gt.slice_index + 1}</span>
+                          </div>
+                          <div className="gt-cell gt-cell-right">
+                            {matched ? (
+                              <>
+                                <span className={`gt-model-badge ${matched.risk}`}>
+                                  #{matched.nodule_number}
+                                </span>
+                                <span className="gt-detail">{matched.size}mm</span>
+                              </>
+                            ) : (
+                              <span className="gt-missed-label">missed</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <div className="nodules-list">
                 {nodules.length > 0 ? nodules.map((nodule, i) => (
                   <div key={nodule.id} className={`nodule-item ${selectedNodule === i ? 'selected' : ''} ${nodule.reviewed ? 'reviewed' : ''}`}
                     onClick={() => goToNoduleSlice(nodule, i)}>
                     <div className="nodule-item-header">
-                      <span className="nodule-number">#{nodule.id}</span>
+                      <span className="nodule-number">#{nodule.nodule_number}</span>
                       <span className={`risk-badge ${nodule.risk}`}>{nodule.risk.toUpperCase()}</span>
                     </div>
                     <div className="nodule-item-info">
@@ -844,7 +1187,7 @@ export default function Review(){
               {nodules.length > 0 && currentNodule && (
                 <div className="nodule-details">
                   <div className="details-header">
-                    <h4>Nodule #{currentNodule.id}</h4>
+                    <h4>Nodule #{currentNodule.nodule_number}</h4>
                     <span className={`risk-indicator ${currentNodule.risk}`}>{currentNodule.risk.toUpperCase()}</span>
                   </div>
 
@@ -872,9 +1215,9 @@ export default function Review(){
                     </div>
 
                     <div className="detail-section xai-section">
-                      <label>XAI Explanation</label>
+                      <label>XAI Explanation <span style={{fontSize:'0.7em',color:'#666',fontWeight:'normal'}}>(concept model — indicative only)</span></label>
                       <div className="xai-features">
-                        {currentNodule.xaiExplanations?.map((exp, i) => (
+                        {buildXaiExplanations(currentNodule).map((exp, i) => (
                           <div key={i} className="xai-feature">
                             <span>{exp.feature}</span>
                             <div className="confidence-bar"><div style={{ width: `${exp.confidence * 100}%` }} /><span>{(exp.confidence * 100).toFixed(0)}%</span></div>
@@ -882,6 +1225,17 @@ export default function Review(){
                         ))}
                       </div>
                     </div>
+
+                    {currentNodule.centerVoxel && (
+                      <div className="detail-section">
+                        <button
+                          className="view-3d-btn"
+                          onClick={() => setViewer3DNodule(currentNodule)}
+                        >
+                          3D View
+                        </button>
+                      </div>
+                    )}
 
                     <div className="detail-section assessment-section">
                       <label>Assessment</label>
@@ -919,6 +1273,15 @@ export default function Review(){
         </div>
       </div>
 
+      {/* 3D Nodule Viewer Modal */}
+      {viewer3DNodule && (
+        <NoduleViewer3D
+          nodule={viewer3DNodule}
+          studyId={studyId}
+          onClose={() => setViewer3DNodule(null)}
+        />
+      )}
+
       {/* Report Modal */}
       {showReportModal && (
         <div className="modal-overlay" onClick={() => setShowReportModal(false)}>
@@ -937,7 +1300,7 @@ export default function Review(){
                 <h4>Nodules to Include</h4>
                 {nodules.filter(n => n.includeInReport).map(nodule => (
                   <div key={nodule.id} className="nodule-preview-item">
-                    <span>#{nodule.id} - {nodule.location}</span><span>{nodule.size}mm</span>
+                    <span>#{nodule.nodule_number} - {nodule.location}</span><span>{nodule.size}mm</span>
                     <span className={`risk-tag ${nodule.risk}`}>{nodule.risk}</span>
                     {nodule.doctorAssessment && <span className={`assessment-tag ${nodule.doctorAssessment}`}>{nodule.doctorAssessment}</span>}
                   </div>

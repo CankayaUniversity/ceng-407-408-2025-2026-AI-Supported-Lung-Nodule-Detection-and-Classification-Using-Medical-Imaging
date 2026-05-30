@@ -519,6 +519,50 @@
   background: radial-gradient(circle at 50% 45%, rgba(255, 0, 0, 0.6) 0%, rgba(255, 255, 0, 0.4) 25%, rgba(0, 255, 0, 0.2) 50%, transparent 75%);
 }
 
+/* Real segmentation mask PNG overlay */
+.segmentation-mask-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.75;
+  object-fit: fill;
+}
+
+/* Real heatmap mask PNG overlay */
+.heatmap-mask-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.6;
+  object-fit: fill;
+  filter: saturate(2) hue-rotate(0deg);
+}
+
+/* 3D View button */
+.view-3d-btn {
+  width: 100%;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #7c3aed, #5b21b6);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.view-3d-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.4);
+}
+
 /* Viewer Overlay */
 .viewer-overlay {
   position: absolute;
@@ -964,6 +1008,96 @@
 
 .generate-report-btn:hover {
   background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+
+/* Ground Truth Comparison Panel */
+.gt-comparison-panel {
+  border-top: 1px solid #1e293b;
+  padding: 0.75rem 1rem 0.5rem;
+}
+
+.gt-comparison-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid #1e293b;
+}
+
+.gt-comparison-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.gt-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.gt-row:hover {
+  background: #1e293b;
+}
+
+.gt-matched {
+  background: rgba(0, 230, 118, 0.06);
+  border-left: 3px solid #00e676;
+}
+
+.gt-missed {
+  background: rgba(239, 68, 68, 0.06);
+  border-left: 3px solid #ef4444;
+}
+
+.gt-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.gt-cell-left { align-items: flex-start; }
+.gt-cell-right { align-items: flex-end; }
+
+.gt-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #00e676;
+}
+
+.gt-detail {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.gt-slice {
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.gt-model-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.gt-model-badge.high { background: rgba(239,68,68,0.2); color: #f87171; }
+.gt-model-badge.medium { background: rgba(245,158,11,0.2); color: #fbbf24; }
+.gt-model-badge.low { background: rgba(34,197,94,0.2); color: #4ade80; }
+
+.gt-missed-label {
+  font-size: 0.7rem;
+  color: #ef4444;
+  font-style: italic;
 }
 
 /* Modal */
